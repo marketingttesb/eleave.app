@@ -53,15 +53,16 @@ export default function App() {
         superior:report_to (
           full_name
         ),
-        leave_eligibility (*)
+        leave_eligibility!uid (*)
       `)
       .eq('id', userId)
-      .eq('leave_eligibility.year', currentYear)
       .single()
 
     if (error) console.error('Failed to fetch profile:', error.message)
     else {
-      const eligibility = data.leave_eligibility?.[0] || { eligibility: data.annual_leave_balance, balance: data.annual_leave_balance }
+      // Filter in JS to avoid inner-join filtering that hides the profile if the year row is missing
+      const eligibility = data.leave_eligibility?.find(e => e.year === currentYear) || 
+                         { eligibility: 0, balance: 0 }
       setProfile({ ...data, current_eligibility: eligibility })
     }
   }

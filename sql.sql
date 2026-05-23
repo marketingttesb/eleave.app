@@ -32,13 +32,15 @@ CREATE TABLE public.leave_durations (
   CONSTRAINT leave_durations_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.leave_eligibility (
-  uid uuid NOT NULL DEFAULT auth.uid(),
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  uid uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
-  year integer,
+  year integer NOT NULL,
   eligibility real,
   balance real,
   modified_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT leave_eligibility_pkey PRIMARY KEY (uid)
+  CONSTRAINT leave_eligibility_pkey PRIMARY KEY (id),
+  CONSTRAINT leave_eligibility_uid_year_key UNIQUE (uid, year)
 );
 CREATE TABLE public.leave_types (
   id integer NOT NULL DEFAULT nextval('leave_types_id_seq'::regclass),
@@ -50,8 +52,6 @@ CREATE TABLE public.profiles (
   updated_at timestamp with time zone DEFAULT now(),
   full_name text NOT NULL,
   position text,
-  supervisor_id uuid,
-  annual_leave_balance numeric DEFAULT 12.0,
   working_days_type text DEFAULT '5_days'::text CHECK (working_days_type = ANY (ARRAY['5_days'::text, '6_days'::text])),
   is_staff boolean DEFAULT true,
   is_superior boolean DEFAULT false,
@@ -59,15 +59,32 @@ CREATE TABLE public.profiles (
   is_super_admin boolean DEFAULT false,
   department_id bigint,
   email text,
-  superior_id uuid,
   report_to uuid,
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
   CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
-  CONSTRAINT profiles_supervisor_id_fkey FOREIGN KEY (supervisor_id) REFERENCES public.profiles(id),
   CONSTRAINT fk_profiles_department FOREIGN KEY (department_id) REFERENCES public.departments(id),
-  CONSTRAINT profiles_superior_id_fkey FOREIGN KEY (superior_id) REFERENCES public.profiles(id),
   CONSTRAINT profiles_report_to_fkey FOREIGN KEY (report_to) REFERENCES public.profiles(id)
 );
+
+-- 1. Kemas kini kekangan kunci asing untuk membolehkan pemadaman automatik (Cascade)
+ALTER TABLE public.profiles
+DROP CONSTRAINT IF EXISTS profiles_id_fkey,
+ADD CONSTRAINT profiles_id_fkey 
+  FOREIGN KEY (id) 
+  REFERENCES auth.users(id) 
+  ON DELETE CASCADE;
+
+-- 2. Cipta fungsi RPC untuk memadam user dari authenticator
+CREATE OR REPLACE FUNCTION delete_staff_permanently(target_user_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER -- Menjalankan fungsi dengan hak admin
+SET search_path = public
+AS $$
+BEGIN
+  DELETE FROM auth.users WHERE id = target_user_id;
+END;
+$$;
 CREATE TABLE public.public_holidays (
   id bigint NOT NULL DEFAULT nextval('public_holidays_id_seq'::regclass),
   holiday_date date NOT NULL UNIQUE,

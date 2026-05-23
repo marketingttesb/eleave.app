@@ -175,7 +175,7 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
     }
 
     const totalRequested = addedDates.reduce((sum, item) => sum + item.durationValue, 0)
-    const currentBalance = profile.current_eligibility?.balance ?? profile.annual_leave_balance
+    const currentBalance = profile.current_eligibility?.balance ?? 0
 
     if (leaveType.toLowerCase().includes('annual') && currentBalance < totalRequested) {
       alert(`Insufficient balance! (Requested: ${totalRequested}, Available: ${currentBalance})`)
@@ -323,7 +323,7 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: '14px' }}>Balance: <strong>{profile.current_eligibility?.balance ?? profile?.annual_leave_balance} Days</strong></div>
+                <div style={{ fontSize: '14px' }}>Balance: <strong>{profile.current_eligibility?.balance ?? 0} Days</strong></div>
                 <button type="submit" disabled={addedDates.length === 0} style={{ padding: '10px 24px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Proceed to Confirmation</button>
               </div>
             </form>

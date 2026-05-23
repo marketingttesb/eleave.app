@@ -92,15 +92,11 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
         ),
         leave_eligibility!uid (*)
       `)
-      .eq('leave_eligibility.year', currentYear)
       .order('full_name', { ascending: true })
     
     if (error) {
-      console.error("Query Error Details:", error)
-      // Jika ralat berlaku disebabkan join superior, cuba ambil data asas sahaja supaya senarai tidak kosong
-      const { data: fallbackData } = await supabase.from('profiles').select('*, departments(id, name)').order('full_name', { ascending: true })
-      if (fallbackData) setStaffList(fallbackData)
-      alert(`System Note: Please ensure 'report_to' foreign key exists in Supabase. (Error: ${error.message})`)
+      console.error("Failed to fetch staff:", error.message)
+      alert(`Database Error: ${error.message}`)
     } else {
       if (data) setStaffList(data)
     }
@@ -132,7 +128,8 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
     setDepartmentId(staff.department_id || (departmentList.length > 0 ? departmentList[0].id : ''))
     setReportToId(staff.report_to || '')
     // Pull eligibility from the yearly record, fallback to profile if record not yet created
-    setAnnualLeave(staff.leave_eligibility?.[0]?.eligibility || staff.annual_leave_balance || 0)
+    const currentYear = new Date().getFullYear()
+    setAnnualLeave(staff.leave_eligibility?.find(e => e.year === currentYear)?.eligibility || 0)
     setWorkingDays(staff.working_days_type || '5_days')
     setShowModal(true)
   }
@@ -146,40 +143,61 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
     const chosenDeptId = departmentId ? parseInt(departmentId) : null
     const chosenReportTo = reportToId || null
 
+    const currentYear = new Date().getFullYear()
+
     if (isEditMode) {
       // --- UPDATE PROFIL PEKERJA ---
-      const { error } = await supabase
+      const { error: profileError } = await supabase
         .from('profiles')
         .update({
           full_name: fullName,
           position: position,
           department_id: chosenDeptId,
           report_to: chosenReportTo,
-          annual_leave_balance: parsedLeave,
           working_days_type: workingDays
         })
         .eq('id', editingStaffId)
 
-      if (error) {
-        alert(`Error updating profile: ${error.message}`)
-      } else {
-        // Sync leave eligibility for current year
-        const currentYear = new Date().getFullYear()
-        const { data: existingElig } = await supabase.from('leave_eligibility')
-          .select('*')
-          .eq('uid', editingStaffId)
-          .eq('year', currentYear)
-          .maybeSingle()
-        
-        if (existingElig) {
-          const diff = parsedLeave - existingElig.eligibility
-          await supabase.from('leave_eligibility').update({ eligibility: parsedLeave, balance: existingElig.balance + diff }).eq('id', existingElig.id)
-        } else {
-          await supabase.from('leave_eligibility').insert([{ uid: editingStaffId, year: currentYear, eligibility: parsedLeave, balance: parsedLeave }])
-        }
+      if (profileError) {
+        alert(`Error updating profile: ${profileError.message}`)
+        setActionLoading(false)
+        return
+      }
 
+      // --- SYNC LEAVE ELIGIBILITY ---
+      const { data: existingElig, error: fetchEligError } = await supabase.from('leave_eligibility')
+        .select('*')
+        .eq('uid', editingStaffId)
+        .eq('year', currentYear)
+        .maybeSingle()
+      
+      if (fetchEligError) {
+        alert(`Error fetching eligibility data: ${fetchEligError.message}`)
+        setActionLoading(false)
+        return
+      }
+
+      let eligUpdateError
+      if (existingElig) {
+        const { error } = await supabase.from('leave_eligibility')
+          .update({ 
+            eligibility: parsedLeave, 
+            modified_at: new Date().toISOString() 
+          })
+          .eq('id', existingElig.id)
+        eligUpdateError = error
+      } else {
+        const { error } = await supabase.from('leave_eligibility')
+          .insert([{ uid: editingStaffId, year: currentYear, eligibility: parsedLeave, balance: parsedLeave }])
+        eligUpdateError = error
+      }
+
+      if (eligUpdateError) {
+        alert(`Profile updated, but eligibility sync failed: ${eligUpdateError.message}`)
+      } else {
+        alert('Staff credentials updated successfully!')
         setShowModal(false)
-        await fetchSuperiors() // Refresh senarai superior jika ada perubahan nama dsb
+        await fetchSuperiors() 
         await fetchStaff()
       }
       setActionLoading(false)
@@ -210,7 +228,6 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
             position: position,
             department_id: chosenDeptId,
             report_to: chosenReportTo,
-            annual_leave_balance: parsedLeave,
             working_days_type: workingDays,
             is_staff: true
           }])
@@ -244,13 +261,14 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
     if (!confirmCheck) return
 
     setActionLoading(true)
-    const { error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', staff.id)
+
+    // Panggil fungsi RPC yang telah dicipta untuk padam akaun & profil sekali gus
+    const { error } = await supabase.rpc('delete_staff_permanently', { 
+      target_user_id: staff.id 
+    })
 
     if (error) {
-      alert(`Error deleting staff profile: ${error.message}`)
+      alert(`Error deleting staff account: ${error.message}`)
     } else {
       await fetchStaff()
     }
@@ -342,10 +360,10 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4b5563' }}>{staff.position || '—'}</td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#111827', fontWeight: '600', textAlign: 'center' }}>
-                    {staff.leave_eligibility?.[0]?.eligibility ?? staff.annual_leave_balance} Days
+                    {staff.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.eligibility ?? 0} Days
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4f46e5', fontWeight: '700', textAlign: 'center' }}>
-                    {staff.leave_eligibility?.[0]?.balance ?? staff.annual_leave_balance} Days
+                    {staff.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.balance ?? 0} Days
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '13px', color: '#4b5563', textAlign: 'center' }}>
                     <span style={{ backgroundColor: staff.working_days_type === '5_days' ? '#ecfdf5' : '#fffbeb', color: staff.working_days_type === '5_days' ? '#059669' : '#d97706', padding: '4px 8px', borderRadius: '4px', fontWeight: '600' }}>

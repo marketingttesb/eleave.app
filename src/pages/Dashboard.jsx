@@ -2,24 +2,41 @@ import React, { useState, useEffect } from 'react'
 
 export default function Dashboard({ supabase, profile }) {
   const [approvedDays, setApprovedDays] = useState(0)
+  const [metrics, setMetrics] = useState({ eligibility: 0, balance: 0 })
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (profile) {
-      fetchApprovedLeave()
+      fetchDashboardData()
     }
   }, [profile])
 
-  const fetchApprovedLeave = async () => {
+  const fetchDashboardData = async () => {
     setLoading(true)
     const currentYear = new Date().getFullYear()
     
+    // 1. Fetch Eligibility and Balance from leave_eligibility table
+    const { data: eligData } = await supabase
+      .from('leave_eligibility')
+      .select('eligibility, balance')
+      .eq('uid', profile.id)
+      .eq('year', currentYear)
+      .maybeSingle()
+
+    if (eligData) {
+      setMetrics({
+        eligibility: eligData.eligibility,
+        balance: eligData.balance
+      })
+    }
+
     // Calculate total approved days for the current year
     const { data, error } = await supabase
       .from('leave_applications')
       .select('duration_value')
       .eq('staff_id', profile.id)
       .eq('status', 'Approved')
+      .eq('leave_type', 'Annual Leave')
       .gte('leave_date', `${currentYear}-01-01`)
       .lte('leave_date', `${currentYear}-12-31`)
 
@@ -79,7 +96,7 @@ export default function Dashboard({ supabase, profile }) {
         <div style={cardStyle}>
           <span style={labelStyle}>📅 Yearly Eligibility</span>
           <h1 style={{ ...valStyle, color: '#4f46e5' }}>
-            {profile.current_eligibility?.eligibility || profile.annual_leave_balance || 0}
+            {loading ? '...' : (metrics.eligibility || 0)}
             <span style={unitStyle}>Days</span>
           </h1>
         </div>
@@ -97,7 +114,7 @@ export default function Dashboard({ supabase, profile }) {
         <div style={cardStyle}>
           <span style={labelStyle}>💰 Current Balance</span>
           <h1 style={{ ...valStyle, color: '#f59e0b' }}>
-            {profile.current_eligibility?.balance || profile.annual_leave_balance || 0}
+            {loading ? '...' : (metrics.balance || 0)}
             <span style={unitStyle}>Days</span>
           </h1>
         </div>

@@ -66,7 +66,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
         applicant:profiles!leave_applications_staff_id_fkey (
           full_name,
           position,
-          leave_eligibility (*)
+          leave_eligibility!uid (*)
         )
       `)
       .eq('approver_id', profile.id)
@@ -89,7 +89,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
     const applicantName = applicant.full_name
     const currentYear = new Date().getFullYear()
     const applicantElig = applicant.leave_eligibility?.find(e => e.year === currentYear) || 
-                         { balance: applicant.annual_leave_balance }
+                         { balance: 0 }
 
     const confirmCheck = window.confirm(`Are you sure you want to process the leave application for ${applicantName}?`)
     if (!confirmCheck) return
@@ -228,8 +228,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
               <div>
                 <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Current Leave Balance</label>
                 <div style={{ fontWeight: '800', color: '#4f46e5', fontSize: '18px' }}>
-                  {selectedBatch.applicant?.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.balance ?? 
-                   selectedBatch.applicant?.annual_leave_balance} 
+                  {selectedBatch.applicant?.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.balance ?? 0} 
                   <span style={{ fontSize: '12px', fontWeight: '400' }}> Days</span>
                 </div>
               </div>
