@@ -17,31 +17,28 @@ CREATE TABLE public.leave_applications (
   duration_value numeric NOT NULL,
   leave_type text NOT NULL,
   status text DEFAULT 'Pending'::text CHECK (status = ANY (ARRAY['Pending'::text, 'Approved'::text, 'Rejected'::text])),
-  approver_id uuid,
   processed_by uuid,
   processed_at timestamp with time zone,
+  approver_id uuid,
   CONSTRAINT leave_applications_pkey PRIMARY KEY (id),
   CONSTRAINT leave_applications_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.profiles(id),
   CONSTRAINT leave_applications_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES public.profiles(id),
   CONSTRAINT leave_applications_approver_id_fkey FOREIGN KEY (approver_id) REFERENCES public.profiles(id)
 );
-
-CREATE TABLE public.leave_eligibility (
-  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  uid uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  year integer NOT NULL,
-  eligibility numeric NOT NULL DEFAULT 14.0,
-  balance numeric NOT NULL DEFAULT 14.0,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  UNIQUE(uid, year)
-);
-
 CREATE TABLE public.leave_durations (
   id integer NOT NULL DEFAULT nextval('leave_durations_id_seq'::regclass),
   duration_name text NOT NULL UNIQUE,
   duration_value numeric NOT NULL,
   CONSTRAINT leave_durations_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.leave_eligibility (
+  uid uuid NOT NULL DEFAULT auth.uid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  year integer,
+  eligibility real,
+  balance real,
+  modified_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT leave_eligibility_pkey PRIMARY KEY (uid)
 );
 CREATE TABLE public.leave_types (
   id integer NOT NULL DEFAULT nextval('leave_types_id_seq'::regclass),
