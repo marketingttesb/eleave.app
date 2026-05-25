@@ -6,6 +6,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
   const [selectedBatchKey, setSelectedBatchId] = useState(null)
   const [editingItems, setEditingItems] = useState([])
   const [rejectReason, setRejectReason] = useState('')
+  const [deptApplications, setDeptApplications] = useState([])
 
   const cardStyle = { 
     backgroundColor: 'white', padding: '30px', borderRadius: '12px', 
@@ -36,16 +37,30 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
 
   const selectedBatch = batches.find(b => b.key === selectedBatchKey)
 
+  // Fungsi untuk mengira jumlah AL yang dipilih dalam editingItems
+  const calculateTotalAL = (items) => {
+    return items
+      .filter(i => i.leave_type === 'Annual Leave' && i.status !== 'Rejected')
+      .reduce((sum, i) => sum + (parseFloat(i.duration_value) || 0), 0)
+  }
+
   // Keep editingItems in sync with selection
   useEffect(() => {
     if (selectedBatch) {
-      setEditingItems(selectedBatch.items.map(item => ({ 
+      const currentYear = new Date().getFullYear()
+      const balance = selectedBatch.applicant?.leave_eligibility?.find(e => e.year === currentYear)?.balance ?? 0
+
+      const initialItems = selectedBatch.items.map(item => ({
         ...item, 
-        status: item.status === 'Pending' ? 'Approved' : item.status 
-      })))
+        status: 'Pending',
+        leave_type: '' // Set to empty to force superior selection
+      }))
+      setEditingItems(initialItems)
+      fetchDeptApplications(selectedBatch)
     } else {
       setEditingItems([])
       setRejectReason('')
+      setDeptApplications([])
     }
   }, [selectedBatchKey, batches])
 
@@ -56,7 +71,6 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
   const fetchPendingApprovals = async () => {
     if (!profile) return
     setLoading(true)
-    const currentYear = new Date().getFullYear()
     
     // Get only PENDING applications where the current user is the designated approver
     let query = supabase
@@ -64,19 +78,80 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
       .select(`
         *,
         applicant:profiles!leave_applications_staff_id_fkey (
+          id,
           full_name,
           position,
+          department_id,
           leave_eligibility!uid (*)
         )
       `)
       .eq('approver_id', profile.id)
       .eq('status', 'Pending')
-      .eq('applicant.leave_eligibility.year', currentYear)
 
     const { data, error } = await query.order('leave_date', { ascending: true })
     
     if (!error) setPendingList(data)
     setLoading(false)
+  }
+
+  const fetchDeptApplications = async (batch) => {
+    const deptId = batch.applicant?.department_id
+    if (!deptId) return
+
+    const datesToCompare = batch.items.map(i => i.leave_date)
+    
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        full_name,
+        leave_applications!leave_applications_staff_id_fkey (
+          id,
+          leave_date,
+          status,
+          duration_type,
+          created_at,
+          reason
+        )
+      `)
+      .eq('department_id', deptId)
+      .neq('id', batch.applicant.id) // Exclude current applicant
+      .order('full_name', { ascending: true })
+
+    if (error) {
+      console.error("Error fetching dept applications:", error.message)
+      return
+    }
+
+    const processed = data.map(staff => {
+      const allStaffLeaves = staff.leave_applications || []
+      const staffBatches = {}
+
+      // Group colleague leaves into batches
+      allStaffLeaves.forEach(leave => {
+        if (leave.status === 'Rejected') return
+        const batchKey = `${leave.created_at}_${leave.reason}`
+        if (!staffBatches[batchKey]) staffBatches[batchKey] = []
+        staffBatches[batchKey].push(leave)
+      })
+
+      const relevantLeaves = []
+      Object.values(staffBatches).forEach(sBatch => {
+        const hasOverlap = sBatch.some(l => datesToCompare.includes(l.leave_date))
+        if (hasOverlap) relevantLeaves.push(...sBatch)
+      })
+
+      if (relevantLeaves.length > 0) {
+        return {
+          id: staff.id,
+          full_name: staff.full_name,
+          relevant_leaves: relevantLeaves.sort((a, b) => a.leave_date.localeCompare(b.leave_date))
+        }
+      }
+      return null
+    }).filter(Boolean)
+
+    setDeptApplications(processed)
   }
 
   const formatDateDisplay = (dateStr) => {
@@ -88,80 +163,106 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
     const applicant = selectedBatch.applicant
     const applicantName = applicant.full_name
     const currentYear = new Date().getFullYear()
-    const applicantElig = applicant.leave_eligibility?.find(e => e.year === currentYear) || 
-                         { balance: 0 }
+    const applicantElig = (applicant.leave_eligibility || []).find(e => e.year === currentYear)
+    
+    // Semak jika cuti tahunan diluluskan tetapi rekod kelayakan tidak wujud
+    const containsAnnualLeaveApproval = editingItems.some(i => i.status === 'Approved' && i.leave_type === 'Annual Leave')
+    if (containsAnnualLeaveApproval && !applicantElig) {
+      alert(`Error: Tidak dapat meluluskan Cuti Tahunan. Rekod kelayakan cuti untuk ${applicantName} bagi tahun ${currentYear} tidak ditemui.`)
+      return
+    }
 
     const confirmCheck = window.confirm(`Are you sure you want to process the leave application for ${applicantName}?`)
     if (!confirmCheck) return
 
     setLoading(true)
+    let hasError = false
 
-    // Validate Balance for the items being approved as Annual Leave
-    const totalAnnualToApprove = editingItems
-      .filter(i => i.status === 'Approved' && i.leave_type === 'Annual Leave')
-      .reduce((sum, i) => sum + parseFloat(i.duration_value), 0)
-    
-    if (totalAnnualToApprove > applicantElig.balance) {
-      alert(`Insufficient balance! This processing requires ${totalAnnualToApprove} days, but user only has ${applicantElig.balance} days available.`)
-      setLoading(false)
-      return
-    }
-
-    // 1. Prepare updates for each item
-    const updates = editingItems.map(item => 
-      supabase.from('leave_applications')
-        .update({ 
+    try {
+      // 1. Proses setiap item permohonan secara jujukan untuk kebolehpercayaan dan verifikasi
+      for (const item of editingItems) {
+        const payload = { 
           status: item.status, 
           leave_type: item.leave_type, 
           processed_by: profile.id, 
           processed_at: new Date().toISOString(),
-          // Append rejection reason if applicable
+          // Lampirkan sebab penolakan jika berkaitan
           reason: item.status === 'Rejected' && rejectReason 
-            ? `${item.reason}\n\n[HOD Reject Reason: ${rejectReason}]` 
+            ? `${item.reason || ''}\n\n[HOD Reject Reason: ${rejectReason}]` 
             : item.reason
-        })
-        .eq('id', item.id)
-    )
+        }
 
-    const results = await Promise.all(updates)
-    const error = results.find(r => r.error)?.error
+        // Gunakan count: 'exact' untuk sahkan baris dikemaskini tanpa bergantung pada pemulangan data
+        const { error: updateError, count } = await supabase
+          .from('leave_applications')
+          .update(payload, { count: 'exact' })
+          .eq('id', item.id)
 
-    // 2. Deduct balance only if there was a successful approval involving Annual Leave
-    if (!error) {
-      const totalAnnual = editingItems
-        .filter(i => i.status === 'Approved' && i.leave_type === 'Annual Leave')
-        .reduce((sum, i) => sum + parseFloat(i.duration_value), 0)
-      
-      if (totalAnnual > 0 && applicantElig.id) {
-        const newBalance = applicantElig.balance - totalAnnual
-        await supabase.from('leave_eligibility')
-          .update({ balance: newBalance })
-          .eq('id', applicantElig.id)
+        if (updateError) {
+          console.error(`Update gagal untuk ID ${item.id}:`, updateError.message)
+          hasError = true
+          break
+        }
+        
+        // Jika count adalah 0, bermakna polisi RLS UPDATE menghalang perubahan 
+        // atau ID tidak ditemui
+        if (count === 0) {
+          console.error(`Update gagal: 0 baris dikemaskini untuk ID ${item.id}.`);
+          alert(`Gagal mengemaskini permohonan ID ${item.id}. Sila pastikan anda mempunyai akses 'UPDATE' di polisi RLS Supabase untuk table leave_applications.`);
+          hasError = true
+          break
+        }
       }
-    }
 
-    if (error) alert(`Error: ${error.message}`)
-    else {
-      alert('Application processed successfully!')
-      setSelectedBatchId(null)
-      fetchPendingApprovals()
-      if (onActionSuccess) onActionSuccess()
+      // 2. Jika semua permohonan berjaya diproses, kemaskini baki cuti jika perlu
+      if (!hasError && containsAnnualLeaveApproval && applicantElig) {
+        const totalAnnual = editingItems
+          .filter(i => i.status === 'Approved' && i.leave_type === 'Annual Leave')
+          .reduce((sum, i) => sum + (parseFloat(i.duration_value) || 0), 0)
+        
+        if (totalAnnual > 0) {
+          const newBalance = applicantElig.balance - totalAnnual
+          const { error: eligError } = await supabase
+            .from('leave_eligibility')
+            .update({ balance: newBalance })
+            .eq('id', applicantElig.id)
+            
+          if (eligError) {
+            console.error("Gagal mengemaskini baki cuti:", eligError.message)
+            alert(`Permohonan diproses, tetapi baki cuti gagal dikemaskini: ${eligError.message}`)
+          }
+        }
+      }
+
+      if (!hasError) {
+        alert('Application processed successfully!')
+        setSelectedBatchId(null)
+        fetchPendingApprovals()
+        if (onActionSuccess) onActionSuccess()
+      } else {
+        alert('Terdapat ralat semasa memproses permohonan. Sila semak konsol untuk maklumat lanjut.')
+      }
+    } catch (err) {
+      console.error("Ralat sistem:", err)
+      alert(`Ralat tidak dijangka: ${err.message}`)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
-  const hasRejectedItems = editingItems.some(item => item.status === 'Rejected')
+  const hasRejectedItems = editingItems.some(item => item.status === 'Rejected');
+  const allItemsAssigned = editingItems.every(item => item.leave_type !== '' || item.status === 'Rejected');
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '30px', width: '100%', height: 'calc(100vh - 150px)' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr 1fr', gap: '20px', width: '100%', height: 'calc(100vh - 150px)' }}>
       
       {/* LEFT COLUMN: BATCH LIST */}
       <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column' }}>
         <div style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '18px' }}>📋 Pending Requests</h3>
-              <p style={{ color: '#6b7280', fontSize: '12px', margin: '2px 0 0 0' }}>{batches.length} total applications</p>
+              <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '20px' }}>📋 Pending Requests</h3>
+              <p style={{ color: '#6b7280', fontSize: '14px', margin: '5px 0 0 0' }}>{batches.length} total applications</p>
             </div>
           </div>
         </div>
@@ -215,7 +316,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <div style={{ borderBottom: '2px solid #f3f4f6', paddingBottom: '15px' }}>
-              <h3 style={{ margin: 0, color: '#111827', fontSize: '20px' }}>Request Details</h3>
+              <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '20px' }}>📄 Request Details</h3>
               <p style={{ margin: '5px 0 0 0', color: '#6b7280', fontSize: '13px' }}>Submitted on {new Date(selectedBatch.created_at).toLocaleString()}</p>
             </div>
 
@@ -242,45 +343,86 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
             </div>
 
             <div>
-              <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Review Dates & Authority</label>
-              <div style={{ marginTop: '10px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
-                {editingItems.map((item, idx) => (
-                  <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 15px', borderBottom: idx === selectedBatch.items.length - 1 ? 'none' : '1px solid #f3f4f6', backgroundColor: 'white' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>{formatDateDisplay(item.leave_date)}</span>
-                      <span style={{ fontSize: '12px', color: '#6b7280' }}>{item.duration_type} ({item.duration_value})</span>
+              <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>
+                Assign Leave Type for Each Date
+              </label>
+              
+              {/* Logik pengiraan baki berpusat sebelum render senarai */}
+              {(() => {
+                const currentYear = new Date().getFullYear();
+                const balance = parseFloat(selectedBatch.applicant?.leave_eligibility?.find(e => e.year === currentYear)?.balance ?? 0);
+                const totalALUsed = Math.round(calculateTotalAL(editingItems) * 100) / 100;
+                const isALFull = totalALUsed >= balance;
+
+                return (
+                  <div style={{ marginTop: '10px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+                    {editingItems.map((item, idx) => {
+                      const isALOptionDisabled = isALFull && item.leave_type !== 'Annual Leave';
+
+                      return (
+                    <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 15px', borderBottom: idx === selectedBatch.items.length - 1 ? 'none' : '1px solid #f3f4f6', backgroundColor: 'white' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>{formatDateDisplay(item.leave_date)}</span>
+                        <span style={{ fontSize: '12px', color: '#6b7280' }}>{item.duration_type} ({item.duration_value})</span>
+                      </div>
+                      <select 
+                        value={item.status === 'Rejected' ? 'Rejected' : item.leave_type} 
+                        onChange={(e) => {
+                          const val = e.target.value
+                          const updated = [...editingItems]
+                          
+                          if (val === 'Rejected') {
+                            updated[idx].status = 'Rejected'
+                            updated[idx].leave_type = 'Rejected'
+                          } else if (val === 'Annual Leave') {
+                            // Simulasi jumlah baru sebelum update state
+                            const tempItems = updated.map((it, i) => i === idx ? { ...it, leave_type: 'Annual Leave' } : it)
+                            const newTotal = Math.round(calculateTotalAL(tempItems) * 100) / 100;
+                            
+                            if (newTotal > balance) {
+                              alert(`❌ ACTION DENIED: Total Annual Leave selected (${newTotal} days) would exceed the staff's current balance of ${balance} days.`);
+                              return
+                            }
+
+                            if (newTotal === balance) {
+                              alert(`📢 INFO: Annual Leave for this staff has been fully utilized (${newTotal}/${balance} days). Any other dates must be assigned as Unpaid Leave or Rejected.`);
+                            }
+
+                            updated[idx].status = 'Approved'
+                            updated[idx].leave_type = 'Annual Leave'
+                          } else if (val === 'Unpaid Leave') {
+                            updated[idx].status = 'Approved'
+                            updated[idx].leave_type = 'Unpaid Leave'
+                          } else {
+                            updated[idx].status = 'Pending'
+                            updated[idx].leave_type = ''
+                          }
+                          setEditingItems(updated)
+                        }}
+                        style={{ 
+                          padding: '4px 8px', 
+                          borderRadius: '6px', 
+                          border: '1px solid #d1d5db', 
+                          fontSize: '13px', 
+                          backgroundColor: item.status === 'Rejected' ? '#fee2e2' : (item.leave_type === 'Unpaid Leave' ? '#fff7ed' : item.leave_type === 'Annual Leave' ? '#ecfdf5' : 'white'),
+                          color: item.status === 'Rejected' ? '#b91c1c' : '#111827',
+                          fontWeight: (item.status === 'Rejected' || item.leave_type !== '') ? '700' : '400'
+                        }}
+                      >
+                        <option value="">-- Please Select --</option>
+                        <option value="Annual Leave" disabled={isALOptionDisabled}>
+                          Annual Leave {isALOptionDisabled ? '(Insufficient Balance)' : ''}
+                        </option>
+                        <option value="Unpaid Leave">Unpaid Leave</option>
+                        <option disabled>──────────</option>
+                        <option value="Rejected">Rejected</option>
+                      </select>
                     </div>
-                    <select 
-                      value={item.status === 'Rejected' ? 'Rejected' : item.leave_type} 
-                      onChange={(e) => {
-                        const val = e.target.value
-                        const updated = [...editingItems]
-                        if (val === 'Rejected') {
-                          updated[idx].status = 'Rejected'
-                        } else {
-                          updated[idx].status = 'Approved'
-                          updated[idx].leave_type = val
-                        }
-                        setEditingItems(updated)
-                      }}
-                      style={{ 
-                        padding: '4px 8px', 
-                        borderRadius: '6px', 
-                        border: '1px solid #d1d5db', 
-                        fontSize: '13px', 
-                        backgroundColor: item.status === 'Rejected' ? '#fee2e2' : (item.leave_type === 'Unpaid Leave' ? '#fff7ed' : 'white'),
-                        color: item.status === 'Rejected' ? '#b91c1c' : '#111827',
-                        fontWeight: item.status === 'Rejected' ? '700' : '400'
-                      }}
-                    >
-                      <option value="Annual Leave">Annual Leave</option>
-                      <option value="Unpaid Leave">Unpaid Leave</option>
-                      <option disabled>──────────</option>
-                      <option value="Rejected">Rejected</option>
-                    </select>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
+                );
+              })()}
             </div>
 
             {hasRejectedItems && (
@@ -299,15 +441,15 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
               <div style={{ fontSize: '14px', fontWeight: '600' }}>Total reviewing: {editingItems.reduce((sum, i) => sum + parseFloat(i.duration_value), 0)} Days</div>
               <button 
                 onClick={handleProcessApplication} 
-                disabled={loading || (hasRejectedItems && !rejectReason.trim())} 
+                disabled={loading || !allItemsAssigned || (hasRejectedItems && !rejectReason.trim())} 
                 style={{ 
                   padding: '10px 24px', 
-                  backgroundColor: (hasRejectedItems && !rejectReason.trim()) ? '#9ca3af' : '#4f46e5', 
+                  backgroundColor: (loading || !allItemsAssigned || (hasRejectedItems && !rejectReason.trim())) ? '#9ca3af' : '#4f46e5', 
                   color: 'white', 
                   border: 'none', 
                   borderRadius: '8px', 
                   fontWeight: '700', 
-                  cursor: (hasRejectedItems && !rejectReason.trim()) ? 'not-allowed' : 'pointer' 
+                  cursor: (loading || !allItemsAssigned || (hasRejectedItems && !rejectReason.trim())) ? 'not-allowed' : 'pointer' 
                 }}
               >
                 {loading ? 'Processing...' : 'Process Application'}
@@ -315,6 +457,68 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
             </div>
           </div>
         )}
+      </div>
+
+      {/* RIGHT COLUMN: DEPARTMENT OVERVIEW */}
+      <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ marginBottom: '20px' }}>
+          <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '18px' }}>🏢 Dept. Absence Overview</h3>
+          <p style={{ color: '#6b7280', fontSize: '12px', margin: '5px 0 0 0' }}>Comparing applicant dates with colleagues</p>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {!selectedBatch ? (
+            <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: '40px', fontSize: '13px' }}>Select a request to see department availability.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {deptApplications.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#10b981', padding: '20px', fontSize: '13px', backgroundColor: '#f0fdf4', borderRadius: '8px', border: '1px solid #bcf0da' }}>
+                  ✅ No department overlaps found for these dates.
+                </div>
+              ) : (
+                deptApplications.map((staff) => (
+                  <div key={staff.id} style={{ 
+                    padding: '12px', 
+                    borderRadius: '8px', 
+                    border: '1px solid #e5e7eb',
+                    backgroundColor: 'white' 
+                  }}>
+                    <div style={{ fontWeight: '700', fontSize: '13px', color: '#111827', marginBottom: '8px' }}>
+                      {staff.full_name}
+                    </div>
+                    
+                    {staff.relevant_leaves.map((leave) => (
+                      <div key={leave.id} style={{ 
+                        marginTop: '6px', 
+                        padding: '8px', 
+                        borderRadius: '6px', 
+                        backgroundColor: leave.status === 'Approved' ? '#ecfdf5' : '#eff6ff',
+                        border: '1px solid',
+                        borderColor: leave.status === 'Approved' ? '#bcf0da' : '#dbeafe'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', fontWeight: '700', color: '#374151' }}>{formatDateDisplay(leave.leave_date)}</span>
+                          <span style={{ 
+                            fontSize: '9px', 
+                            padding: '1px 5px', 
+                            borderRadius: '4px', 
+                            fontWeight: '800',
+                            textTransform: 'uppercase',
+                            backgroundColor: leave.status === 'Approved' ? '#059669' : '#2563eb',
+                            color: 'white'
+                          }}>
+                            {leave.status}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '2px' }}>{leave.duration_type}</div>
+                      </div>
+                    ))}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -12,10 +12,11 @@ export default function TopBanner({ profile, activeMenu, onLogout }) {
       case 'shift_type': return '📅 Shift Type Configuration'
       case 'public_holiday': return '📆 Yearly Public Holidays'
       case 'daily_report': return '📋 Daily Leave Report'
+      case 'update_password': return '🔐 Update Password'
       case 'monthly_report': return '📈 Monthly Leave Report'
       case 'manage_department':return '🏢 Manage Corporate Departments'
       case 'manage_access': return '🔒 Access Control Management'
-      default: return 'E-Leave System'
+      default: return 'Tien Tien E-Leave System'
     }
   }
 
@@ -30,7 +31,7 @@ export default function TopBanner({ profile, activeMenu, onLogout }) {
             e.target.style.display = 'none'
             document.getElementById('fallback-text').style.display = 'block'
           }}
-          style={{ height: '40px', objectFit: 'contain' }}
+          style={{ height: '60px', objectFit: 'contain' }}
         />
         <h3 id="fallback-text" style={{ display: 'none', margin: 0, fontSize: '18px', fontWeight: '800', color: '#ef4444' }}>TIEN TIEN</h3>
       </div>

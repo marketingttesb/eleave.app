@@ -9,6 +9,7 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
   const [loading, setLoading] = useState(false)
   const [leaveHistory, setLeaveHistory] = useState([]) // Sejarah cuti staf
   const [showConfirmation, setShowConfirmation] = useState(false) // Mod pengesahan
+  const [publicHolidays, setPublicHolidays] = useState([]) // Senarai tarikh cuti umum
 
   // Main Form States
   const [leaveType, setLeaveType] = useState('Annual Leave')
@@ -49,13 +50,17 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
 
   useEffect(() => {
     fetchMetadata()
-    fetchLeaveHistory()
   }, [])
+
+  useEffect(() => {
+    if (profile) fetchLeaveHistory()
+  }, [profile])
 
   const fetchMetadata = async () => {
     const { data: types } = await supabase.from('leave_types').select('*').order('type_name', { ascending: true })
     const { data: durs } = await supabase.from('leave_durations').select('*').order('duration_value', { descending: true })
-    
+    const { data: holidays } = await supabase.from('public_holidays').select('holiday_date')
+
     if (types) {
       setLeaveTypes(types)
       const annual = types.find(t => t.type_name.toLowerCase().includes('annual'))
@@ -66,6 +71,9 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
       setDurations(durs)
       if (durs.length > 0) setTempDurationId(durs[0].id)
     }
+    if (holidays) {
+      setPublicHolidays(holidays.map(h => h.holiday_date))
+    }
   }
 
   const fetchLeaveHistory = async () => {
@@ -74,7 +82,7 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
       .from('leave_applications')
       .select('*')
       .eq('staff_id', profile.id)
-      .order('leave_date', { ascending: false })
+      .order('leave_date', { ascending: false }) // Susun tarikh terbaru di atas
       .order('created_at', { ascending: false })
     
     if (!error) setLeaveHistory(data)
@@ -89,6 +97,19 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
   const addDateToList = () => {
     if (!tempDate || !tempDurationId) {
       alert("Please select both date and duration.")
+      return
+    }
+
+    // Rule: Sekat permohonan pada hari Ahad
+    const dateObj = parseISO(tempDate)
+    if (dateObj.getDay() === 0) {
+      alert("Application Denied: Leave cannot be applied on Sundays.")
+      return
+    }
+
+    // Rule: Sekat permohonan pada tarikh Cuti Umum (Public Holiday)
+    if (publicHolidays.includes(tempDate)) {
+      alert("Application Denied: Selected date is a Public Holiday.")
       return
     }
 
@@ -174,16 +195,6 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
       return
     }
 
-    const totalRequested = addedDates.reduce((sum, item) => sum + item.durationValue, 0)
-    const currentBalance = profile.current_eligibility?.balance ?? 0
-
-    if (leaveType.toLowerCase().includes('annual') && currentBalance < totalRequested) {
-      alert(`Insufficient balance! (Requested: ${totalRequested}, Available: ${currentBalance})`)
-      setLoading(false)
-      setShowConfirmation(false)
-      return
-    }
-
     const insertData = addedDates.map(d => ({
       staff_id: profile.id,
       approver_id: profile.report_to,
@@ -231,6 +242,12 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
     setLoading(false)
   }
 
+  // Kirakan jumlah cuti tahunan yang telah diluluskan untuk tahun semasa
+  const currentYear = new Date().getFullYear()
+  const approvedAnnualDays = leaveHistory
+    .filter(h => h.status === 'Approved' && h.leave_type === 'Annual Leave' && h.leave_date.startsWith(String(currentYear)))
+    .reduce((sum, h) => sum + parseFloat(h.duration_value), 0)
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '30px', width: '100%' }}>
       
@@ -264,10 +281,9 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
               </div>
 
               <div style={{ backgroundColor: '#f9fafb', padding: '20px', borderRadius: '8px', border: '1px dashed #d1d5db' }}>
-                <label style={{ ...labelStyle, marginBottom: '15px', color: '#4f46e5' }}>➕ Add Leave Dates</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '15px', alignItems: 'end' }}>
                   <div>
-                    <label style={{ fontSize: '11px', fontWeight: '600' }}>Date</label>
+                    <label style={labelStyle}>Date</label>
                     <Flatpickr
                       value={tempDate}
                       onChange={([date]) => {
@@ -276,14 +292,18 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
                         setTempDate(formatted)
                       }}
                       options={{
-                        dateFormat: "Y-m-d", // This forces the display to YYYY-MM-DD
+                      dateFormat: "Y-m-d",
+                      disable: [
+                        (date) => date.getDay() === 0, // Disable Sundays (0)
+                        ...publicHolidays // Disable specific dates from the holiday list
+                      ]
                       }}
                       style={inputStyle}
                       placeholder="Select Date"
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '11px', fontWeight: '600' }}>Duration</label>
+                    <label style={labelStyle}>Duration</label>
                     <select value={tempDurationId} onChange={(e) => setTempDurationId(e.target.value)} style={inputStyle}>
                       {durations.map(d => <option key={d.id} value={d.id}>{d.duration_name}</option>)}
                     </select>
@@ -322,30 +342,64 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: '14px' }}>Balance: <strong>{profile.current_eligibility?.balance ?? 0} Days</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                 <button type="submit" disabled={addedDates.length === 0} style={{ padding: '10px 24px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Proceed to Confirmation</button>
               </div>
             </form>
           </>
         ) : (
-          <div style={{ textAlign: 'center' }}>
-            <h3 style={{ color: '#4f46e5' }}>⚠️ Confirm Your Application</h3>
-            <p>Please review your leave request details before final submission.</p>
+          <div>
+            <div style={{ marginBottom: '25px' }}>
+              <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '20px' }}>⚠️ Confirm Leave Application</h3>
+              <p style={{ color: '#6b7280', fontSize: '14px', margin: '5px 0 0 0' }}>Please review your leave request details before final submission.</p>
+            </div>
             
-            <div style={{ textAlign: 'left', backgroundColor: '#f9fafb', padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', margin: '20px 0' }}>
-              <p><strong>Reason:</strong> {reason}</p>
-              <p><strong>Approver:</strong> {profile?.superior?.full_name}</p>
-              <p><strong>Total Days:</strong> {addedDates.reduce((sum, i) => sum + i.durationValue, 0)}</p>
-              <hr />
-              <label style={labelStyle}>Date Summary:</label>
-              {addedDates.map((d, i) => (
-                <div key={i} style={{ fontSize: '14px', marginBottom: '4px' }}>• {formatDateDisplay(d.date)} - {d.durationName}</div>
-              ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', backgroundColor: '#f9fafb', padding: '25px', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '25px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                <div>
+                  <label style={labelStyle}>Approver</label>
+                  <div style={{ fontSize: '15px', color: '#111827', fontWeight: '500' }}>{profile?.superior?.full_name || 'Not Assigned'}</div>
+                </div>
+                <div>
+                  <label style={labelStyle}>Total Duration</label>
+                  <div style={{ fontSize: '18px', color: '#4f46e5', fontWeight: '800' }}>
+                    {addedDates.reduce((sum, i) => sum + i.durationValue, 0)} <span style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>Days</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '15px' }}>
+                <label style={labelStyle}>Reason</label>
+                <div style={{ fontSize: '15px', color: '#111827', fontWeight: '500' }}>{reason}</div>
+              </div>
+
+              <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '15px' }}>
+                <label style={labelStyle}>Date Breakdown</label>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <th style={{ padding: '8px 0', fontSize: '12px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Date</th>
+                        <th style={{ padding: '8px 0', fontSize: '12px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Day</th>
+                        <th style={{ padding: '8px 0', fontSize: '12px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Duration</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {addedDates.map((d, i) => (
+                        <tr key={i} style={{ borderBottom: i === addedDates.length - 1 ? 'none' : '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '10px 0', fontSize: '14px', color: '#111827', fontWeight: '500' }}>{formatDateDisplay(d.date)}</td>
+                          <td style={{ padding: '10px 0', fontSize: '14px', color: '#4b5563' }}>{d.day}</td>
+                          <td style={{ padding: '10px 0', fontSize: '14px', color: '#4b5563' }}>{d.durationName}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
-              <button onClick={() => setShowConfirmation(false)} style={{ padding: '10px 24px', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '8px', cursor: 'pointer' }}>Cancel & Edit</button>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowConfirmation(false)} style={{ padding: '10px 20px', backgroundColor: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Cancel & Edit</button>
               <button onClick={handleFinalConfirm} disabled={loading} style={{ padding: '10px 24px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>
                 {loading ? 'Submitting...' : 'Confirm & Submit'}
               </button>
@@ -356,9 +410,28 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
 
       {/* KANAN: SEJARAH CUTI (HISTORY) */}
       <div style={cardStyle}>
+        {/* Panel Ringkasan Cuti (Dashboard Info) */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', textAlign: 'center', marginBottom: '25px' }}>
+          <div>
+            <div style={{ color: '#4f46e5', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Eligibility</div>
+            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>{profile.current_eligibility?.eligibility ?? 0}</div>
+          </div>
+          <div style={{ borderLeft: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb' }}>
+            <div style={{ color: '#4f46e5', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Approved</div>
+            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>{approvedAnnualDays}</div>
+          </div>
+          <div>
+            <div style={{ color: '#4f46e5', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Balance</div>
+            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>{profile.current_eligibility?.balance ?? 0}</div>
+          </div>
+        </div>
+
+        {/* Separator */}
+        <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb', margin: '0 -30px 25px -30px' }} />
+
         <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ margin: 0, color: '#111827', fontSize: '18px' }}>📜 Leave History</h3>
-          <p style={{ color: '#6b7280', fontSize: '13px', margin: '5px 0 0 0' }}>Track your applied dates.</p>
+          <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '20px' }}>📜 Leave History</h3>
+          <p style={{ color: '#6b7280', fontSize: '14px', margin: '5px 0 0 0' }}>Track your applied dates.</p>
         </div>
         
         <div style={{ maxHeight: '600px', overflowY: 'auto' }}>

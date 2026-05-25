@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 // Import our new decoupled items
 import TopBanner from './components/TopBanner'
-import Sidebar from './components/Sidebar'
+import Topbar from './components/Topbar'
 import Dashboard from './pages/Dashboard'
 import ManageAccess from './pages/ManageAccess'
 import ManageStaff from './pages/ManageStaff'
@@ -11,6 +11,8 @@ import ManageDepartments from './pages/ManageDepartments'
 import ApplyLeave from './pages/ApplyLeave'
 import LeaveHistory from './pages/LeaveHistory'
 import LeaveApproval from './pages/LeaveApproval'
+import YearlyPublicHolidays from './pages/YearlyPublicHolidays'
+import UpdatePassword from './pages/UpdatePassword'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -117,12 +119,16 @@ export default function App() {
             onActionSuccess={() => fetchProfile(session.user.id)} 
           />
         )
+
+      case 'update_password':
+        return <UpdatePassword supabase={supabase} />
+
       //case 'manage_staff': return <div style={cardStyle}><h3>👥 Manage Staff Profiles</h3></div>
       case 'manage_staff': return <ManageStaff supabase={supabase} currentAdminProfile={profile} />
-      case 'leave_type': return <div style={cardStyle}><h3>🗂️ Leave Type Configuration</h3></div>
+      case 'leave_type': return <div style={cardStyle}><h3>🗂️ Leave Type Configuration</h3></div>; // This is a placeholder, not implemented yet
       case 'manage_department':return <ManageDepartments supabase={supabase} />
-      case 'shift_type': return <div style={cardStyle}><h3>📅 Shift Type Configuration</h3></div>
-      case 'public_holiday': return <div style={cardStyle}><h3>⚱️ Yearly Public Holidays</h3></div>
+      case 'shift_type': return <div style={cardStyle}><h3>📅 Shift Type Configuration</h3></div>; // This is a placeholder, not implemented yet
+      case 'public_holiday': return <YearlyPublicHolidays supabase={supabase} />
       case 'daily_report': return <div style={cardStyle}><h3>📋 Daily Leave Report</h3></div>
       case 'monthly_report': return <div style={cardStyle}><h3>📈 Monthly Leave Report</h3></div>
       default: return <div>Interface not found.</div>
@@ -152,12 +158,10 @@ export default function App() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'sans-serif', backgroundColor: '#f3f4f6' }}>
       <TopBanner profile={profile} activeMenu={activeMenu} onLogout={handleLogout} />
+      <Topbar profile={profile} activeMenu={activeMenu} setActiveMenu={setActiveMenu} />
       
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <Sidebar profile={profile} activeMenu={activeMenu} setActiveMenu={setActiveMenu} />
-        <div style={{ flex: 1, padding: '40px', overflowY: 'auto' }}>
-          {renderContent()}
-        </div>
+      <div style={{ flex: 1, padding: '40px', overflowY: 'auto' }}>
+        {renderContent()}
       </div>
     </div>
   )

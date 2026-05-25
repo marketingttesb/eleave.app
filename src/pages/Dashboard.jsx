@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
+import { format, parseISO, isPast } from 'date-fns'
 
 export default function Dashboard({ supabase, profile }) {
   const [approvedDays, setApprovedDays] = useState(0)
   const [metrics, setMetrics] = useState({ eligibility: 0, balance: 0 })
+  const [upcomingPublicHolidays, setUpcomingPublicHolidays] = useState([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -44,6 +46,24 @@ export default function Dashboard({ supabase, profile }) {
       const total = data.reduce((sum, item) => sum + parseFloat(item.duration_value), 0)
       setApprovedDays(total)
     }
+
+    // Fetch and filter upcoming public holidays
+    const { data: holidaysData, error: holidaysError } = await supabase
+      .from('public_holidays')
+      .select('holiday_date, holiday_name')
+      .gte('holiday_date', `${currentYear}-01-01`)
+      .lte('holiday_date', `${currentYear}-12-31`)
+      .order('holiday_date', { ascending: true })
+
+    if (!holidaysError && holidaysData) {
+      const today = new Date()
+      const upcoming = holidaysData.filter(holiday => {
+        const holidayDateObj = parseISO(holiday.holiday_date)
+        return !isPast(holidayDateObj, { inclusive: true }) // Only show holidays from today onwards
+      })
+      setUpcomingPublicHolidays(upcoming)
+    }
+
     setLoading(false)
   }
 
@@ -119,6 +139,51 @@ export default function Dashboard({ supabase, profile }) {
           </h1>
         </div>
 
+      </div>
+
+      {/* UPCOMING PUBLIC HOLIDAYS */}
+      <div style={{ marginTop: '40px' }}>
+        <h3 style={{ margin: '0 0 15px 0', color: '#4f46e5', fontSize: '20px' }}>🗓️ Upcoming Public Holidays</h3>
+        <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', backgroundColor: 'white' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151' }}>Date</th>
+                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151' }}>Day</th>
+                <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151' }}>Holiday Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan="3" style={{ padding: '30px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
+                    Loading public holidays...
+                  </td>
+                </tr>
+              ) : upcomingPublicHolidays.length === 0 ? (
+                <tr>
+                  <td colSpan="3" style={{ padding: '30px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
+                    No upcoming public holidays for this year.
+                  </td>
+                </tr>
+              ) : (
+                upcomingPublicHolidays.map((holiday) => (
+                  <tr key={holiday.holiday_date} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                    <td style={{ padding: '14px 16px', fontSize: '14px', fontWeight: '600', color: '#111827' }}>
+                      {format(parseISO(holiday.holiday_date), 'dd MMMM yyyy')}
+                    </td>
+                    <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4b5563' }}>
+                      {format(parseISO(holiday.holiday_date), 'EEEE')}
+                    </td>
+                    <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4b5563' }}>
+                      {holiday.holiday_name}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )

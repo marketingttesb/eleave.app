@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { createClient } from '@supabase/supabase-js'
 
 export default function ManageStaff({ supabase, currentAdminProfile }) {
   const [staffList, setStaffList] = useState([])
@@ -9,6 +10,7 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
   // States untuk Search, Filter & Modal Windows
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('All') // Menggunakan ID untuk tapisan
+  const [statusFilter, setStatusFilter] = useState('Active') // Default to Active
   const [showModal, setShowModal] = useState(false)
   const [isEditMode, setIsEditMode] = useState(false)
   const [editingStaffId, setEditingStaffId] = useState(null)
@@ -21,7 +23,9 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
   const [departmentId, setDepartmentId] = useState('') // Menyimpan ID jabatan terpilih
   const [reportToId, setReportToId] = useState('') // Menyimpan ID penyelia (Superior)
   const [annualLeave, setAnnualLeave] = useState(14)
+  const [leaveBalance, setLeaveBalance] = useState(14)
   const [workingDays, setWorkingDays] = useState('5_days')
+  const [staffStatus, setStaffStatus] = useState('Active')
 
   // Ditukar kepada width 100% untuk konsistensi reka bentuk sistem
   const cardStyle = { 
@@ -113,7 +117,9 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
     setDepartmentId(departmentList.length > 0 ? departmentList[0].id : '')
     setReportToId('')
     setAnnualLeave(14)
+    setLeaveBalance(14)
     setWorkingDays('5_days')
+    setStaffStatus('Active')
     setShowModal(true)
   }
 
@@ -127,10 +133,13 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
     setPosition(staff.position || '')
     setDepartmentId(staff.department_id || (departmentList.length > 0 ? departmentList[0].id : ''))
     setReportToId(staff.report_to || '')
-    // Pull eligibility from the yearly record, fallback to profile if record not yet created
+    // Pull eligibility from the yearly record, default to 14 if record not yet created for current year
     const currentYear = new Date().getFullYear()
-    setAnnualLeave(staff.leave_eligibility?.find(e => e.year === currentYear)?.eligibility || 0)
+    const currentElig = staff.leave_eligibility?.find(e => e.year === currentYear)
+    setAnnualLeave(currentElig?.eligibility ?? 14)
+    setLeaveBalance(currentElig?.balance ?? 14)
     setWorkingDays(staff.working_days_type || '5_days')
+    setStaffStatus(staff.staff_status || 'Active')
     setShowModal(true)
   }
 
@@ -140,6 +149,7 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
     setActionLoading(true)
 
     const parsedLeave = parseFloat(annualLeave)
+    const parsedBalance = parseFloat(leaveBalance)
     const chosenDeptId = departmentId ? parseInt(departmentId) : null
     const chosenReportTo = reportToId || null
 
@@ -154,7 +164,8 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
           position: position,
           department_id: chosenDeptId,
           report_to: chosenReportTo,
-          working_days_type: workingDays
+          working_days_type: workingDays,
+          staff_status: staffStatus
         })
         .eq('id', editingStaffId)
 
@@ -165,35 +176,15 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
       }
 
       // --- SYNC LEAVE ELIGIBILITY ---
-      const { data: existingElig, error: fetchEligError } = await supabase.from('leave_eligibility')
-        .select('*')
-        .eq('uid', editingStaffId)
-        .eq('year', currentYear)
-        .maybeSingle()
-      
-      if (fetchEligError) {
-        alert(`Error fetching eligibility data: ${fetchEligError.message}`)
-        setActionLoading(false)
-        return
-      }
+      const { error: eligSyncError } = await supabase.rpc('sync_staff_leave_eligibility', {
+        p_uid: editingStaffId,
+        p_year: currentYear,
+        p_eligibility: parsedLeave,
+        p_balance: parsedBalance
+      })
 
-      let eligUpdateError
-      if (existingElig) {
-        const { error } = await supabase.from('leave_eligibility')
-          .update({ 
-            eligibility: parsedLeave, 
-            modified_at: new Date().toISOString() 
-          })
-          .eq('id', existingElig.id)
-        eligUpdateError = error
-      } else {
-        const { error } = await supabase.from('leave_eligibility')
-          .insert([{ uid: editingStaffId, year: currentYear, eligibility: parsedLeave, balance: parsedLeave }])
-        eligUpdateError = error
-      }
-
-      if (eligUpdateError) {
-        alert(`Profile updated, but eligibility sync failed: ${eligUpdateError.message}`)
+      if (eligSyncError) {
+        alert(`Profile updated, but eligibility sync failed: ${eligSyncError.message}`)
       } else {
         alert('Staff credentials updated successfully!')
         setShowModal(false)
@@ -203,7 +194,15 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
       setActionLoading(false)
     } else {
       // --- PENDAFTARAN AUTOMATIK AKAUN BARU (AUTH + PROFILE) ---
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      
+      // Cipta temporary client supaya sesi admin tidak 'overwritten' oleh staff baru
+      const tempClient = createClient(
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_ANON_KEY,
+        { auth: { persistSession: false } }
+      )
+
+      const { data: authData, error: authError } = await tempClient.auth.signUp({
         email: email,
         password: password,
         options: { data: { full_name: fullName } }
@@ -229,21 +228,28 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
             department_id: chosenDeptId,
             report_to: chosenReportTo,
             working_days_type: workingDays,
-            is_staff: true
+            is_staff: true,
+            staff_status: staffStatus
           }])
 
         if (profileError) {
           alert(`Auth account created, but profile failed: ${profileError.message}`)
         } else {
-          // Create initial eligibility
-          await supabase.from('leave_eligibility').insert([{
-            uid: newUserId,
-            year: new Date().getFullYear(),
-            eligibility: parsedLeave,
-            balance: parsedLeave
-          }])
-          setShowModal(false)
-          await fetchStaff()
+          // Create initial eligibility - ensuring balance matches annual leave and year is current
+          const { error: eligError } = await supabase.rpc('sync_staff_leave_eligibility', {
+            p_uid: newUserId,
+            p_year: currentYear,
+            p_eligibility: parsedLeave,
+            p_balance: parsedBalance
+          });
+
+          if (eligError) {
+            alert(`Auth account and profile created, but initial leave eligibility failed: ${eligError.message}`)
+          } else {
+            alert('New staff registered successfully!')
+            setShowModal(false)
+            await fetchStaff()
+          }
         }
       }
       setActionLoading(false)
@@ -280,7 +286,8 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
     const matchesSearch = staff.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           staff.position?.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesDept = selectedDepartmentId === 'All' || String(staff.department_id) === String(selectedDepartmentId)
-    return matchesSearch && matchesDept
+    const matchesStatus = statusFilter === 'All' || (staff.staff_status || 'Active') === statusFilter
+    return matchesSearch && matchesDept && matchesStatus
   })
 
   return (
@@ -321,6 +328,15 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
             <option key={dept.id} value={dept.id}>{dept.name}</option>
           ))}
         </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px', backgroundColor: 'white' }}
+        >
+          <option value="All">All Status</option>
+          <option value="Active">Active Only</option>
+          <option value="Resigned">Resigned Only</option>
+        </select>
       </div>
 
       {/* UTAMA: JADUAL DIREKTORI STAF */}
@@ -332,6 +348,7 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
               <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151' }}>Department</th>
               <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151' }}>Reporting To</th>
               <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151' }}>Designation</th>
+              <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151', textAlign: 'center' }}>Status</th>
               <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151', textAlign: 'center' }}>Eligibility</th>
               <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151', textAlign: 'center' }}>Balance</th>
               <th style={{ padding: '14px 16px', fontSize: '13px', fontWeight: '600', color: '#374151', textAlign: 'center' }}>Work Type</th>
@@ -341,7 +358,7 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
           <tbody>
             {filteredStaff.length === 0 ? (
               <tr>
-                <td colSpan="8" style={{ padding: '30px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
+                <td colSpan="9" style={{ padding: '30px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
                   No employee records found.
                 </td>
               </tr>
@@ -359,6 +376,11 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
                     {staff.superior?.full_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>Not Assigned</span>}
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4b5563' }}>{staff.position || '—'}</td>
+                  <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                    <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '12px', fontWeight: '700', backgroundColor: staff.staff_status === 'Resigned' ? '#fee2e2' : '#ecfdf5', color: staff.staff_status === 'Resigned' ? '#dc2626' : '#059669' }}>
+                      {staff.staff_status || 'Active'}
+                    </span>
+                  </td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#111827', fontWeight: '600', textAlign: 'center' }}>
                     {staff.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.eligibility ?? 0} Days
                   </td>
@@ -479,14 +501,32 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
                   Annual Leave Eligibility
-                  <input type="number" required step="0.5" value={annualLeave} onChange={(e) => setAnnualLeave(e.target.value)} min="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', marginTop: '4px', boxSizing: 'border-box' }} />
+                  <input type="number" required step="0.5" value={annualLeave} onChange={(e) => {
+                    const val = e.target.value
+                    setAnnualLeave(val)
+                    if (!isEditMode) setLeaveBalance(val)
+                  }} min="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', marginTop: '4px', boxSizing: 'border-box' }} />
                 </label>
 
+                <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
+                  Current Leave Balance
+                  <input type="number" required step="0.5" value={leaveBalance} onChange={(e) => setLeaveBalance(e.target.value)} min="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', marginTop: '4px', boxSizing: 'border-box' }} />
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
                   Working Structure
                   <select value={workingDays} onChange={(e) => setWorkingDays(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', marginTop: '4px', backgroundColor: 'white' }}>
                     <option value="5_days">5 Days / Week</option>
                     <option value="6_days">6 Days / Week</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
+                  Employment Status
+                  <select value={staffStatus} onChange={(e) => setStaffStatus(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', marginTop: '4px', backgroundColor: 'white' }}>
+                    <option value="Active">Active</option>
+                    <option value="Resigned">Resigned</option>
                   </select>
                 </label>
               </div>
