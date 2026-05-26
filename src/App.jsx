@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import { check } from '@tauri-apps/plugin-updater'
 
 // Import our new decoupled items
 import TopBanner from './components/TopBanner'
@@ -30,6 +31,21 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState('dashboard')
 
   useEffect(() => {
+    const checkForUpdates = async () => {
+      try {
+        const update = await check();
+        if (update) {
+          console.log(`Update to ${update.version} available!`);
+          // You can show a custom modal here
+          if (window.confirm(`Version ${update.version} is available. Install and restart?`)) {
+            await update.downloadAndInstall();
+          }
+        }
+      } catch (error) {
+        console.error('Failed to check for updates:', error);
+      }
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session) fetchProfile(session.user.id)
@@ -38,6 +54,7 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session) {
+        checkForUpdates();
         fetchProfile(session.user.id)
       } else {
         setProfile(null)
