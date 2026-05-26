@@ -3,7 +3,7 @@ import React from 'react'
 export default function TopBanner({ profile, activeMenu, onLogout }) {
   const getPageTitle = () => {
     switch (activeMenu) {
-      case 'dashboard': return '📊 Dashboard Overview'
+      case 'dashboard': return 'Tien Tien E-Leave Dashboard'
       case 'apply': return '📝 Apply Leave'
       case 'history': return '📜 Leave History'
       case 'approval': return '📋 Leave Approval'

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
-export default function ManageStaff({ supabase, currentAdminProfile }) {
+export default function ManageStaff({ supabase }) {
   const [staffList, setStaffList] = useState([])
   const [departmentList, setDepartmentList] = useState([]) // Memegang senarai jabatan dari DB
   const [superiorList, setSuperiorList] = useState([]) // Senarai staf yang is_superior = true
@@ -256,31 +256,6 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
     }
   }
 
-  // 6. Fungsi Padam Profil Pekerja
-  const handleDeleteStaff = async (staff) => {
-    if (staff.id === currentAdminProfile.id) {
-      alert('Action Denied! You cannot delete your own logged-in account.')
-      return
-    }
-
-    const confirmCheck = window.confirm(`Are you sure you want to permanently delete ${staff.full_name}?`)
-    if (!confirmCheck) return
-
-    setActionLoading(true)
-
-    // Panggil fungsi RPC yang telah dicipta untuk padam akaun & profil sekali gus
-    const { error } = await supabase.rpc('delete_staff_permanently', { 
-      target_user_id: staff.id 
-    })
-
-    if (error) {
-      alert(`Error deleting staff account: ${error.message}`)
-    } else {
-      await fetchStaff()
-    }
-    setActionLoading(false)
-  }
-
   // --- TAPISAN DATA CARIAN & JABATAN MENGGUNAKAN ID ---
   const filteredStaff = staffList.filter(staff => {
     const matchesSearch = staff.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -399,13 +374,6 @@ export default function ManageStaff({ supabase, currentAdminProfile }) {
                         style={{ padding: '6px 10px', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', color: '#111827', fontWeight: '500' }}
                       >
                         ✏️ Edit
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteStaff(staff)} 
-                        disabled={staff.id === currentAdminProfile.id} 
-                        style={{ padding: '6px 10px', backgroundColor: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '6px', cursor: staff.id === currentAdminProfile.id ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: '600' }}
-                      >
-                        🗑️ Delete
                       </button>
                     </div>
                   </td>

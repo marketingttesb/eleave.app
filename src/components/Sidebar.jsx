@@ -52,6 +52,7 @@ export default function Sidebar({ profile, activeMenu, setActiveMenu }) {
             {/* PENAMBAHAN MENU BARU: MANAGE DEPARTMENT UNDER HR */}
             <li onClick={() => setActiveMenu('manage_department')} style={menuBtnStyle('manage_department')}><span>🏢</span> Manage Department</li>
             
+            {/* Comment out for v1.0
             <div>
               <div onClick={() => setOpenManageLeave(!openManageLeave)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', color: '#9ca3af', cursor: 'pointer', fontSize: '14px', fontWeight: '500' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>🛠️ Manage Leave</span>
@@ -64,6 +65,7 @@ export default function Sidebar({ profile, activeMenu, setActiveMenu }) {
                 </div>
               )}
             </div>
+            */}
 
             <li onClick={() => setActiveMenu('public_holiday')} style={menuBtnStyle('public_holiday')}><span>📆</span> Yearly Public Holiday</li>
             

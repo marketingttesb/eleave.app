@@ -171,6 +171,7 @@ export default function Topbar({ profile, activeMenu, setActiveMenu }) {
               >
                 <span>📆</span> Yearly Public Holiday
               </div>
+              {/* Comment out for v1.0
               <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb', margin: '8px 0' }} />
               <div
                 style={dropdownItemStyle('leave_type')}
@@ -196,6 +197,7 @@ export default function Topbar({ profile, activeMenu, setActiveMenu }) {
               >
                 <span>📅</span> Shift Type
               </div>
+              */}
               <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb', margin: '8px 0' }} />
               <div 
                 style={dropdownItemStyle('daily_report')} 

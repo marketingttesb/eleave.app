@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "eleaveapp",
+  "productName": "Tien Tien E-Leave",
   "version": "0.1.0",
   "identifier": "com.tientien.eleaveapp",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "eleaveapp",
+        "title": "Tien Tien E-Leave | v1.0.1",
         "width": 800,
         "height": 600
       }
