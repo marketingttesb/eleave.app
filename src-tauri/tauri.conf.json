@@ -28,7 +28,11 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWduIGVuY3J5cHRlZCBzZWNyZXQga2V5ClJXUlRZMEl5UWtWQ0lFY1BFL3N1SGpoendxV0lqc0pZWXVHcktIbXV0NUdsM1A0WmpERUFBQkFBQUFBQUFBQUFBQUlBQUFBQWowZ2FwRmZhOVJhV2JiMWt5TFhlMmJkdC9kYlhsTk14Ykp6N0RxdjMyNXRWMHJnOGM2ZnBqVGNtVXUvQWpJTXNBb2N2K3krVFZIa09qY3VITFI0aEsxSDlhdENuYzI0NDdRblZOVE80TUJ4cXRkUTBwY0NlMlJKa1g2MDE4ei8yNGJzLzB1TG9jdzA9Cg=="
+      "active": true,
+      "endpoints": [
+        "https://github.com/marketingttesb/eleave.app/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRFOThGQkY4RjRDMTdERjYKUldUMmZjSDArUHVZVG8zYWFqdE5qZC9oY2pxNFFLWEhkNnpLOUxqOEs0aTVpZGZHN0dPaS9LUGgK"
     }
   }
 }
