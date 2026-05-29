@@ -24,6 +24,8 @@ export default function ManageStaff({ supabase }) {
   const [reportToId, setReportToId] = useState('') // Menyimpan ID penyelia (Superior)
   const [annualLeave, setAnnualLeave] = useState(14)
   const [leaveBalance, setLeaveBalance] = useState(14)
+  const [mcEligibility, setMcEligibility] = useState(14)
+  const [mcBalance, setMcBalance] = useState(14)
   const [workingDays, setWorkingDays] = useState('5_days')
   const [staffStatus, setStaffStatus] = useState('Active')
 
@@ -118,6 +120,8 @@ export default function ManageStaff({ supabase }) {
     setReportToId('')
     setAnnualLeave(14)
     setLeaveBalance(14)
+    setMcEligibility(14)
+    setMcBalance(14)
     setWorkingDays('5_days')
     setStaffStatus('Active')
     setShowModal(true)
@@ -138,6 +142,8 @@ export default function ManageStaff({ supabase }) {
     const currentElig = staff.leave_eligibility?.find(e => e.year === currentYear)
     setAnnualLeave(currentElig?.eligibility ?? 14)
     setLeaveBalance(currentElig?.balance ?? 14)
+    setMcEligibility(currentElig?.mc_eligibility ?? 14)
+    setMcBalance(currentElig?.mc_balance ?? 14)
     setWorkingDays(staff.working_days_type || '5_days')
     setStaffStatus(staff.staff_status || 'Active')
     setShowModal(true)
@@ -150,6 +156,8 @@ export default function ManageStaff({ supabase }) {
 
     const parsedLeave = parseFloat(annualLeave)
     const parsedBalance = parseFloat(leaveBalance)
+    const parsedMcEligibility = parseFloat(mcEligibility)
+    const parsedMcBalance = parseFloat(mcBalance)
     const chosenDeptId = departmentId ? parseInt(departmentId) : null
     const chosenReportTo = reportToId || null
 
@@ -182,6 +190,18 @@ export default function ManageStaff({ supabase }) {
         p_eligibility: parsedLeave,
         p_balance: parsedBalance
       })
+
+      if (!eligSyncError) {
+        // Also update MC eligibility and balance in the database
+        await supabase
+          .from('leave_eligibility')
+          .update({
+            mc_eligibility: parsedMcEligibility,
+            mc_balance: parsedMcBalance
+          })
+          .eq('uid', editingStaffId)
+          .eq('year', currentYear)
+      }
 
       if (eligSyncError) {
         alert(`Profile updated, but eligibility sync failed: ${eligSyncError.message}`)
@@ -242,6 +262,18 @@ export default function ManageStaff({ supabase }) {
             p_eligibility: parsedLeave,
             p_balance: parsedBalance
           });
+
+          if (!eligError) {
+            // Also update MC eligibility and balance in the database
+            await supabase
+              .from('leave_eligibility')
+              .update({
+                mc_eligibility: parsedMcEligibility,
+                mc_balance: parsedMcBalance
+              })
+              .eq('uid', newUserId)
+              .eq('year', currentYear)
+          }
 
           if (eligError) {
             alert(`Auth account and profile created, but initial leave eligibility failed: ${eligError.message}`)
@@ -357,10 +389,12 @@ export default function ManageStaff({ supabase }) {
                     </span>
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#111827', fontWeight: '600', textAlign: 'center' }}>
-                    {staff.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.eligibility ?? 0} Days
+                    <div>{staff.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.eligibility ?? 0}d AL</div>
+                    <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: '400' }}>{staff.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.mc_eligibility ?? 0}d MC</div>
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4f46e5', fontWeight: '700', textAlign: 'center' }}>
-                    {staff.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.balance ?? 0} Days
+                    <div>{staff.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.balance ?? 0}d AL</div>
+                    <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '600' }}>{staff.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.mc_balance ?? 0}d MC</div>
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '13px', color: '#4b5563', textAlign: 'center' }}>
                     <span style={{ backgroundColor: staff.working_days_type === '5_days' ? '#ecfdf5' : '#fffbeb', color: staff.working_days_type === '5_days' ? '#059669' : '#d97706', padding: '4px 8px', borderRadius: '4px', fontWeight: '600' }}>
@@ -479,6 +513,22 @@ export default function ManageStaff({ supabase }) {
                 <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
                   Current Leave Balance
                   <input type="number" required step="0.5" value={leaveBalance} onChange={(e) => setLeaveBalance(e.target.value)} min="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', marginTop: '4px', boxSizing: 'border-box' }} />
+                </label>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
+                  Sick Leave (MC) Eligibility
+                  <input type="number" required step="0.5" value={mcEligibility} onChange={(e) => {
+                    const val = e.target.value
+                    setMcEligibility(val)
+                    if (!isEditMode) setMcBalance(val)
+                  }} min="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', marginTop: '4px', boxSizing: 'border-box' }} />
+                </label>
+
+                <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
+                  Sick Leave (MC) Balance
+                  <input type="number" required step="0.5" value={mcBalance} onChange={(e) => setMcBalance(e.target.value)} min="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', marginTop: '4px', boxSizing: 'border-box' }} />
                 </label>
               </div>
 

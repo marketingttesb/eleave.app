@@ -248,6 +248,11 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
     .filter(h => h.status === 'Approved' && h.leave_type === 'Annual Leave' && h.leave_date.startsWith(String(currentYear)))
     .reduce((sum, h) => sum + parseFloat(h.duration_value), 0)
 
+  // Kirakan jumlah cuti sakit (MC) yang telah diluluskan untuk tahun semasa
+  const approvedMcDays = leaveHistory
+    .filter(h => h.status === 'Approved' && h.leave_type === 'Sick Leave - MC' && h.leave_date.startsWith(String(currentYear)))
+    .reduce((sum, h) => sum + parseFloat(h.duration_value), 0)
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '30px', width: '100%' }}>
       
@@ -411,18 +416,75 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
       {/* KANAN: SEJARAH CUTI (HISTORY) */}
       <div style={cardStyle}>
         {/* Panel Ringkasan Cuti (Dashboard Info) */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', textAlign: 'center', marginBottom: '25px' }}>
-          <div>
-            <div style={{ color: '#4f46e5', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Eligibility</div>
-            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>{profile.current_eligibility?.eligibility ?? 0}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '25px' }}>
+          {/* AL Combined Card */}
+          <div style={{ 
+            padding: '12px 18px', 
+            backgroundColor: '#f5f3ff', 
+            borderRadius: '10px', 
+            border: '1px solid #ddd6fe',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px'
+          }}>
+            <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>
+              📅 Annual Leave
+            </div>
+            <div style={{ display: 'flex', marginTop: '2px' }}>
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Elig.</div>
+                <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827' }}>
+                  {profile.current_eligibility?.eligibility ?? 0}d
+                </div>
+              </div>
+              <div style={{ borderLeft: '1px solid #ddd6fe', paddingLeft: '14px', flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Used</div>
+                <div style={{ fontSize: '15px', fontWeight: '800', color: '#10b981' }}>
+                  {approvedAnnualDays}d
+                </div>
+              </div>
+              <div style={{ borderLeft: '1px solid #ddd6fe', paddingLeft: '14px', flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Bal.</div>
+                <div style={{ fontSize: '15px', fontWeight: '800', color: '#4f46e5' }}>
+                  {profile.current_eligibility?.balance ?? 0}d
+                </div>
+              </div>
+            </div>
           </div>
-          <div style={{ borderLeft: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb' }}>
-            <div style={{ color: '#4f46e5', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Approved</div>
-            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>{approvedAnnualDays}</div>
-          </div>
-          <div>
-            <div style={{ color: '#4f46e5', fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>Balance</div>
-            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>{profile.current_eligibility?.balance ?? 0}</div>
+
+          {/* MC Combined Card */}
+          <div style={{ 
+            padding: '12px 18px', 
+            backgroundColor: '#eff6ff', 
+            borderRadius: '10px', 
+            border: '1px solid #bfdbfe',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px'
+          }}>
+            <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>
+              🤢 Sick Leave (MC)
+            </div>
+            <div style={{ display: 'flex', marginTop: '2px' }}>
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Elig.</div>
+                <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827' }}>
+                  {profile.current_eligibility?.mc_eligibility ?? 0}d
+                </div>
+              </div>
+              <div style={{ borderLeft: '1px solid #bfdbfe', paddingLeft: '14px', flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Used</div>
+                <div style={{ fontSize: '15px', fontWeight: '800', color: '#10b981' }}>
+                  {approvedMcDays}d
+                </div>
+              </div>
+              <div style={{ borderLeft: '1px solid #bfdbfe', paddingLeft: '14px', flex: 1, textAlign: 'center' }}>
+                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Bal.</div>
+                <div style={{ fontSize: '15px', fontWeight: '800', color: '#2563eb' }}>
+                  {profile.current_eligibility?.mc_balance ?? 0}d
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

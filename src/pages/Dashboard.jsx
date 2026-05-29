@@ -3,7 +3,8 @@ import { format, parseISO, isPast } from 'date-fns'
 
 export default function Dashboard({ supabase, profile }) {
   const [approvedDays, setApprovedDays] = useState(0)
-  const [metrics, setMetrics] = useState({ eligibility: 0, balance: 0 })
+  const [approvedMcDays, setApprovedMcDays] = useState(0)
+  const [metrics, setMetrics] = useState({ eligibility: 0, balance: 0, mc_eligibility: 0, mc_balance: 0 })
   const [upcomingPublicHolidays, setUpcomingPublicHolidays] = useState([])
   const [loading, setLoading] = useState(false)
 
@@ -20,7 +21,7 @@ export default function Dashboard({ supabase, profile }) {
     // 1. Fetch Eligibility and Balance from leave_eligibility table
     const { data: eligData } = await supabase
       .from('leave_eligibility')
-      .select('eligibility, balance')
+      .select('eligibility, balance, mc_eligibility, mc_balance')
       .eq('uid', profile.id)
       .eq('year', currentYear)
       .maybeSingle()
@@ -28,11 +29,13 @@ export default function Dashboard({ supabase, profile }) {
     if (eligData) {
       setMetrics({
         eligibility: eligData.eligibility,
-        balance: eligData.balance
+        balance: eligData.balance,
+        mc_eligibility: eligData.mc_eligibility,
+        mc_balance: eligData.mc_balance
       })
     }
 
-    // Calculate total approved days for the current year
+    // Calculate total approved days for Annual Leave
     const { data, error } = await supabase
       .from('leave_applications')
       .select('duration_value')
@@ -45,6 +48,21 @@ export default function Dashboard({ supabase, profile }) {
     if (!error && data) {
       const total = data.reduce((sum, item) => sum + parseFloat(item.duration_value), 0)
       setApprovedDays(total)
+    }
+
+    // Calculate total approved days for Sick Leave (MC)
+    const { data: mcData } = await supabase
+      .from('leave_applications')
+      .select('duration_value')
+      .eq('staff_id', profile.id)
+      .eq('status', 'Approved')
+      .eq('leave_type', 'Sick Leave - MC')
+      .gte('leave_date', `${currentYear}-01-01`)
+      .lte('leave_date', `${currentYear}-12-31`)
+
+    if (mcData) {
+      const totalMc = mcData.reduce((sum, item) => sum + parseFloat(item.duration_value), 0)
+      setApprovedMcDays(totalMc)
     }
 
     // Fetch and filter upcoming public holidays
@@ -67,40 +85,6 @@ export default function Dashboard({ supabase, profile }) {
     setLoading(false)
   }
 
-  const cardStyle = { 
-    backgroundColor: 'white', 
-    padding: '24px', 
-    borderRadius: '12px', 
-    border: '1px solid #e5e7eb', 
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px'
-  }
-
-  const labelStyle = { 
-    fontSize: '12px', 
-    fontWeight: '700', 
-    color: '#6b7280', 
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em'
-  }
-
-  const valStyle = { 
-    margin: 0, 
-    fontSize: '36px', 
-    fontWeight: '800',
-    display: 'flex',
-    alignItems: 'baseline'
-  }
-
-  const unitStyle = { 
-    fontSize: '16px', 
-    fontWeight: '500', 
-    color: '#9ca3af',
-    marginLeft: '6px'
-  }
-
   return (
     <div style={{ width: '100%' }}>
       <div style={{ marginBottom: '32px' }}>
@@ -110,35 +94,72 @@ export default function Dashboard({ supabase, profile }) {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px' }}>
-        
-        {/* Pill 1: Yearly Eligibility */}
-        <div style={cardStyle}>
-          <span style={labelStyle}>📅 Yearly Eligibility</span>
-          <h1 style={{ ...valStyle, color: '#4f46e5' }}>
-            {loading ? '...' : (metrics.eligibility || 0)}
-            <span style={unitStyle}>Days</span>
-          </h1>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '40px' }}>
+        {/* Annual Leave Card */}
+        <div style={{ 
+          padding: '24px', 
+          backgroundColor: '#f5f3ff', 
+          borderRadius: '12px', 
+          border: '1px solid #ddd6fe',
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
+        }}>
+          <div style={{ fontSize: '14px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', textAlign: 'center', marginBottom: '16px' }}>
+            📅 Annual Leave Summary
+          </div>
+          <div style={{ display: 'flex' }}>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600' }}>Eligibility</div>
+              <div style={{ fontSize: '28px', fontWeight: '800', color: '#111827' }}>
+                {loading ? '...' : metrics.eligibility}d
+              </div>
+            </div>
+            <div style={{ borderLeft: '1px solid #ddd6fe', flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600' }}>Used</div>
+              <div style={{ fontSize: '28px', fontWeight: '800', color: '#10b981' }}>
+                {loading ? '...' : approvedDays}d
+              </div>
+            </div>
+            <div style={{ borderLeft: '1px solid #ddd6fe', flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600' }}>Balance</div>
+              <div style={{ fontSize: '28px', fontWeight: '800', color: '#4f46e5' }}>
+                {loading ? '...' : metrics.balance}d
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Pill 2: Approved Leave */}
-        <div style={cardStyle}>
-          <span style={labelStyle}>✅ Approved Leave</span>
-          <h1 style={{ ...valStyle, color: '#10b981' }}>
-            {loading ? '...' : approvedDays}
-            <span style={unitStyle}>Days</span>
-          </h1>
+        {/* MC Card */}
+        <div style={{ 
+          padding: '24px', 
+          backgroundColor: '#eff6ff', 
+          borderRadius: '12px', 
+          border: '1px solid #bfdbfe',
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
+        }}>
+          <div style={{ fontSize: '14px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', textAlign: 'center', marginBottom: '16px' }}>
+            🤢 Sick Leave (MC) Summary
+          </div>
+          <div style={{ display: 'flex' }}>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600' }}>Eligibility</div>
+              <div style={{ fontSize: '28px', fontWeight: '800', color: '#111827' }}>
+                {loading ? '...' : metrics.mc_eligibility}d
+              </div>
+            </div>
+            <div style={{ borderLeft: '1px solid #bfdbfe', flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600' }}>Used</div>
+              <div style={{ fontSize: '28px', fontWeight: '800', color: '#10b981' }}>
+                {loading ? '...' : approvedMcDays}d
+              </div>
+            </div>
+            <div style={{ borderLeft: '1px solid #bfdbfe', flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600' }}>Balance</div>
+              <div style={{ fontSize: '28px', fontWeight: '800', color: '#2563eb' }}>
+                {loading ? '...' : metrics.mc_balance}d
+              </div>
+            </div>
+          </div>
         </div>
-
-        {/* Pill 3: Leave Balance */}
-        <div style={cardStyle}>
-          <span style={labelStyle}>💰 Current Balance</span>
-          <h1 style={{ ...valStyle, color: '#f59e0b' }}>
-            {loading ? '...' : (metrics.balance || 0)}
-            <span style={unitStyle}>Days</span>
-          </h1>
-        </div>
-
       </div>
 
       {/* UPCOMING PUBLIC HOLIDAYS */}

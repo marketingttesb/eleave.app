@@ -16,6 +16,7 @@ import YearlyPublicHolidays from './pages/YearlyPublicHolidays'
 import UpdatePassword from './pages/UpdatePassword'
 import MonthlyReport from './pages/MonthlyReport'
 import DailyReport from './pages/DailyReport'
+import ManagePersonalLeave from './pages/ManagePersonalLeave'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -144,6 +145,7 @@ export default function App() {
 
       //case 'manage_staff': return <div style={cardStyle}><h3>👥 Manage Staff Profiles</h3></div>
       case 'manage_staff': return <ManageStaff supabase={supabase} />
+      case 'manage_personal_leave': return <ManagePersonalLeave supabase={supabase} profile={profile} />
       case 'leave_type': return <div style={cardStyle}><h3>🗂️ Leave Type Configuration</h3></div>; // This is a placeholder, not implemented yet
       case 'manage_department':return <ManageDepartments supabase={supabase} />
       case 'shift_type': return <div style={cardStyle}><h3>📅 Shift Type Configuration</h3></div>; // This is a placeholder, not implemented yet

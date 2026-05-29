@@ -320,19 +320,53 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
               <p style={{ margin: '5px 0 0 0', color: '#6b7280', fontSize: '13px' }}>Submitted on {new Date(selectedBatch.created_at).toLocaleString()}</p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '20px', alignItems: 'flex-start' }}>
               <div>
                 <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Applicant</label>
                 <div style={{ fontWeight: '600', color: '#111827' }}>{selectedBatch.applicant?.full_name}</div>
                 <div style={{ fontSize: '13px', color: '#6b7280' }}>{selectedBatch.applicant?.position}</div>
               </div>
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Current Leave Balance</label>
-                <div style={{ fontWeight: '800', color: '#4f46e5', fontSize: '18px' }}>
-                  {selectedBatch.applicant?.leave_eligibility?.find(e => e.year === new Date().getFullYear())?.balance ?? 0} 
-                  <span style={{ fontSize: '12px', fontWeight: '400' }}> Days</span>
-                </div>
-              </div>
+              
+              {/* Leave statistics cards for applicant context */}
+              {(() => {
+                const currentYear = new Date().getFullYear();
+                const applicantElig = selectedBatch.applicant?.leave_eligibility?.find(e => e.year === currentYear);
+                const usedAL = (applicantElig?.eligibility ?? 0) - (applicantElig?.balance ?? 0);
+                const usedMC = (applicantElig?.mc_eligibility ?? 0) - (applicantElig?.mc_balance ?? 0);
+
+                return (
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    {/* AL Card */}
+                    <div style={{ padding: '8px 12px', backgroundColor: '#f5f3ff', borderRadius: '8px', border: '1px solid #ddd6fe', minWidth: '140px' }}>
+                      <div style={{ fontSize: '9px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', textAlign: 'left' }}>📅 Annual Leave</div>
+                      <div style={{ display: 'flex', marginTop: '4px' }}>
+                        <div style={{ flex: 1, textAlign: 'center' }}>
+                          <div style={{ fontSize: '8px', color: '#6b7280' }}>Used</div>
+                          <div style={{ fontSize: '13px', fontWeight: '800', color: '#10b981' }}>{usedAL}d</div>
+                        </div>
+                        <div style={{ borderLeft: '1px solid #ddd6fe', paddingLeft: '10px', flex: 1, textAlign: 'center' }}>
+                          <div style={{ fontSize: '8px', color: '#6b7280' }}>Bal.</div>
+                          <div style={{ fontSize: '13px', fontWeight: '800', color: '#4f46e5' }}>{applicantElig?.balance ?? 0}d</div>
+                        </div>
+                      </div>
+                    </div>
+                    {/* MC Card */}
+                    <div style={{ padding: '8px 12px', backgroundColor: '#eff6ff', borderRadius: '8px', border: '1px solid #bfdbfe', minWidth: '140px' }}>
+                      <div style={{ fontSize: '9px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', textAlign: 'left' }}>🤢 Sick Leave (MC)</div>
+                      <div style={{ display: 'flex', marginTop: '4px' }}>
+                        <div style={{ flex: 1, textAlign: 'center' }}>
+                          <div style={{ fontSize: '8px', color: '#6b7280' }}>Used</div>
+                          <div style={{ fontSize: '13px', fontWeight: '800', color: '#10b981' }}>{usedMC}d</div>
+                        </div>
+                        <div style={{ borderLeft: '1px solid #bfdbfe', paddingLeft: '10px', flex: 1, textAlign: 'center' }}>
+                          <div style={{ fontSize: '8px', color: '#6b7280' }}>Bal.</div>
+                          <div style={{ fontSize: '13px', fontWeight: '800', color: '#2563eb' }}>{applicantElig?.mc_balance ?? 0}d</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div>

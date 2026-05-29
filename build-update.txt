@@ -1,3 +1,225 @@
 $env:TAURI_SIGNING_PRIVATE_KEY="dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWduIGVuY3J5cHRlZCBzZWNyZXQga2V5ClJXUlRZMEl5UWtWQ0lFY1BFL3N1SGpoendxV0lqc0pZWXVHcktIbXV0NUdsM1A0WmpERUFBQkFBQUFBQUFBQUFBQUlBQUFBQWowZ2FwRmZhOVJhV2JiMWt5TFhlMmJkdC9kYlhsTk14Ykp6N0RxdjMyNXRWMHJnOGM2ZnBqVGNtVXUvQWpJTXNBb2N2K3krVFZIa09qY3VITFI0aEsxSDlhdENuYzI0NDdRblZOVE80TUJ4cXRkUTBwY0NlMlJKa1g2MDE4ei8yNGJzLzB1TG9jdzA9Cg=="
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD="147369"
 npm run tauri build
+
+
+
+
+
+--
+
+# Tauri Update Release Guide (GitHub Auto Updater)
+
+## 1. Update version
+
+### package.json
+
+Cari:
+
+```json
+"version": "0.1.1"
+```
+
+Tukar:
+
+```json
+"version": "0.1.2"
+```
+
+---
+
+### src-tauri/tauri.conf.json
+
+Cari:
+
+```json
+"version": "0.1.1"
+```
+
+Tukar:
+
+```json
+"version": "0.1.2"
+```
+
+Pastikan dua-dua sama.
+
+---
+
+# 2. Build app
+
+Run:
+
+```bash
+npm run tauri build
+```
+
+Tunggu sampai siap.
+
+---
+
+# 3. Cari file output
+
+Biasanya dekat:
+
+```bash
+src-tauri/target/release/bundle/nsis/
+```
+
+Akan ada:
+
+```text
+Tien Tien E-Leave_0.1.2_x64-setup.exe
+Tien Tien E-Leave_0.1.2_x64-setup.exe.sig
+```
+
+---
+
+# 4. Generate latest.json
+
+Buat file `latest.json`
+
+Paste:
+
+```json
+{
+  "version": "0.1.2",
+  "notes": "Update Manage Personal Leave",
+  "pub_date": "2026-05-29T08:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "PASTE CONTENT FROM .sig FILE HERE",
+      "url": "https://github.com/marketingttesb/eleave.app/releases/download/v0.1.2/Tien%20Tien%20E-Leave_0.1.2_x64-setup.exe"
+    }
+  }
+}
+```
+
+---
+
+# 5. Copy signature
+
+Buka file:
+
+```bash
+Tien Tien E-Leave_0.1.2_x64-setup.exe.sig
+```
+
+Copy semua content.
+
+Paste ke:
+
+```json
+"signature": ""
+```
+
+---
+
+# 6. Commit code
+
+```bash
+git add .
+git commit -m "release v0.1.2"
+git push
+```
+
+---
+
+# 7. Create GitHub Release
+
+Buka:
+
+https://github.com/marketingttesb/eleave.app/releases
+
+Klik:
+
+```text
+Draft a new release
+```
+
+---
+
+# 8. Isi release info
+
+## Tag
+
+```text
+v0.1.2
+```
+
+---
+
+## Release title
+
+```text
+v0.1.2
+```
+
+---
+
+## Description
+
+```text
+Update Manage Personal Leave
+```
+
+---
+
+# 9. Upload files
+
+Upload 3 file:
+
+```text
+latest.json
+Tien Tien E-Leave_0.1.2_x64-setup.exe
+Tien Tien E-Leave_0.1.2_x64-setup.exe.sig
+```
+
+---
+
+# 10. Publish
+
+Klik:
+
+```text
+Publish release
+```
+
+---
+
+# 11. Test update
+
+Open current installed app.
+
+Click:
+
+```text
+Check for updates
+```
+
+Expected:
+
+```text
+Update available
+↓
+Downloading
+↓
+Installer opens
+↓
+Update complete
+```
+
+---
+
+# IMPORTANT CHECKLIST
+
+Before publish:
+
+☐ version package.json updated
+☐ version tauri.conf.json updated
+☐ build success
+☐ .exe uploaded
+☐ .sig uploaded
+☐ latest.json uploaded
+☐ tag uses `v0.1.2` (NO `v.0.1.2`)
+☐ latest.json URL exactly matches uploaded .exe filename

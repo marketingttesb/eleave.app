@@ -122,6 +122,7 @@ export default function Topbar({ profile, activeMenu, setActiveMenu }) {
         <div
           style={itemStyle([
             'manage_staff',
+            'manage_personal_leave',
             'manage_department',
             'public_holiday',
             'leave_type',
@@ -146,6 +147,18 @@ export default function Topbar({ profile, activeMenu, setActiveMenu }) {
                 }}
               >
                 <span>👥</span> Manage Staff
+              </div>
+              <div
+                style={dropdownItemStyle('manage_personal_leave')}
+                onClick={() => { setActiveMenu('manage_personal_leave'); setHoverMenu(null); }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e9ecef'; e.currentTarget.style.color = '#212529'; }}
+                onMouseLeave={(e) => { 
+                  const isActive = activeMenu === 'manage_personal_leave';
+                  e.currentTarget.style.backgroundColor = isActive ? '#e9ecef' : 'transparent'; 
+                  e.currentTarget.style.color = isActive ? '#212529' : '#343a40'; 
+                }}
+              >
+                <span>📝</span> Manage Staff Leave
               </div>
               <div
                 style={dropdownItemStyle('manage_department')}

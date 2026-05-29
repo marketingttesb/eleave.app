@@ -37,6 +37,8 @@ CREATE TABLE public.leave_eligibility (
   year integer NOT NULL,
   eligibility real,
   balance real,
+  mc_eligibility real,
+  mc_balance real,
   modified_at timestamp with time zone DEFAULT now(),
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   CONSTRAINT leave_eligibility_pkey PRIMARY KEY (id),
