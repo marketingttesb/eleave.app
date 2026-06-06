@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { check } from '@tauri-apps/plugin-updater'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
-import { TrayIcon } from '@tauri-apps/api/tray'
-import { Menu } from '@tauri-apps/api/menu'
+
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, isEnabled } from '@tauri-apps/plugin-autostart'
 
@@ -61,47 +60,6 @@ export default function App() {
         }
       } catch (error) {
         console.error('Failed to check for updates:', error);
-      }
-    };
-
-    const setupTray = async (window) => {
-      try {
-        // Pastikan kita tidak membuat tray berlapis jika komponen di-mount semula
-        const existingTray = await TrayIcon.getById('main-tray');
-        if (existingTray) return;
-
-        // Cipta Menu untuk Tray
-        const menu = await Menu.new({
-          items: [
-            {
-              text: 'Show e-Leave',
-              action: () => {
-                window.show();
-                window.setFocus();
-              }
-            },
-            {
-              text: 'Quit Application',
-              action: () => appWindow.destroy() // Guna destroy untuk tutup terus tanpa trigger preventDefault
-            }
-          ]
-        });
-
-        // Inisialisasi Tray Icon
-        await TrayIcon.new({
-          id: 'main-tray',
-          menu,
-          tooltip: 'Tien Tien E-Leave System',
-          action: (event) => {
-            // Restore window pada klik kiri atau double click
-            if ((event.type === 'Click' && event.button === 'Left') || event.type === 'DoubleClick') {
-              window.show();
-              window.setFocus();
-            }
-          }
-        });
-      } catch (err) {
-        console.error('Tray initialization error:', err);
       }
     };
 
@@ -209,7 +167,6 @@ export default function App() {
     // Jalankan pendaftaran kritikal dahulu
     registerCloseListener();
     registerMinimizeListener();
-    setupTray(appWindow);
     initApp();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
