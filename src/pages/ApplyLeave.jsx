@@ -211,6 +211,14 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
     if (error) {
       alert(`Error submitting application: ${error.message}`)
     } else {
+      // Notify the superior
+      await supabase.from('notifications').insert({
+        user_id: profile.report_to,
+        title: 'New Leave Request',
+        message: `${profile.full_name} has submitted a request for ${addedDates.length} day(s).`,
+        type: 'application'
+      });
+
       alert('Leave application submitted successfully!')
       setReason('')
       setAddedDates([])
@@ -427,7 +435,7 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
             flexDirection: 'column',
             gap: '4px'
           }}>
-            <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>
+            <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center' }}>
               📅 Annual Leave
             </div>
             <div style={{ display: 'flex', marginTop: '2px' }}>
@@ -462,7 +470,7 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
             flexDirection: 'column',
             gap: '4px'
           }}>
-            <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>
+            <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center' }}>
               🤢 Sick Leave (MC)
             </div>
             <div style={{ display: 'flex', marginTop: '2px' }}>

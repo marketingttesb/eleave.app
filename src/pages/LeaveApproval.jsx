@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 
-export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
+export default function LeaveApproval({ supabase, profile, onActionSuccess, initialApplicantId, initialCreatedAt }) {
   const [pendingList, setPendingList] = useState([])
   const [loading, setLoading] = useState(false)
   const [selectedBatchKey, setSelectedBatchId] = useState(null)
@@ -62,7 +62,15 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
       setRejectReason('')
       setDeptApplications([])
     }
-  }, [selectedBatchKey, batches])
+  }, [selectedBatchKey, batches, initialApplicantId, initialCreatedAt]) // Add initial props to dependencies
+
+  // Effect to select batch if initialApplicantId and initialCreatedAt are provided
+  useEffect(() => {
+    if (initialApplicantId && initialCreatedAt && !selectedBatchKey) {
+      const targetBatch = batches.find(b => b.applicant.id === initialApplicantId && b.created_at === initialCreatedAt);
+      if (targetBatch) setSelectedBatchId(targetBatch.key);
+    }
+  }, [batches, initialApplicantId, initialCreatedAt, selectedBatchKey]);
 
   useEffect(() => {
     if (profile) fetchPendingApprovals()
@@ -235,6 +243,30 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
       }
 
       if (!hasError) {
+        // 1. Notify the Applicant
+        await supabase.from('notifications').insert({
+          user_id: applicant.id,
+          related_user_id: applicant.id, // The applicant's ID
+          related_created_at: selectedBatch.created_at, // The created_at of the leave application batch
+          title: 'Leave Application Processed',
+          message: `Your leave request from ${new Date(selectedBatch.created_at).toLocaleDateString()} has been processed by ${profile.full_name}.`,
+          type: 'approval'
+        });
+
+        // 2. Notify HR Department
+        const { data: hrStaff } = await supabase.from('profiles').select('id').eq('is_hr', true);
+        if (hrStaff && hrStaff.length > 0) {
+          const hrNotifs = hrStaff.map(hr => ({
+            user_id: hr.id,
+            related_user_id: applicant.id, // The applicant's ID
+            related_created_at: selectedBatch.created_at, // The created_at of the leave application batch
+            title: 'Leave Status Update',
+            message: `${profile.full_name} (Superior) has processed leave for ${applicant.full_name}.`,
+            type: 'approval'
+          }));
+          await supabase.from('notifications').insert(hrNotifs);
+        }
+
         alert('Application processed successfully!')
         setSelectedBatchId(null)
         fetchPendingApprovals()
@@ -338,7 +370,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
                   <div style={{ display: 'flex', gap: '12px' }}>
                     {/* AL Card */}
                     <div style={{ padding: '8px 12px', backgroundColor: '#f5f3ff', borderRadius: '8px', border: '1px solid #ddd6fe', minWidth: '140px' }}>
-                      <div style={{ fontSize: '9px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', textAlign: 'left' }}>📅 Annual Leave</div>
+                      <div style={{ fontSize: '9px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', textAlign: 'center' }}>📅 Annual Leave</div>
                       <div style={{ display: 'flex', marginTop: '4px' }}>
                         <div style={{ flex: 1, textAlign: 'center' }}>
                           <div style={{ fontSize: '8px', color: '#6b7280' }}>Used</div>
@@ -352,7 +384,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess }) {
                     </div>
                     {/* MC Card */}
                     <div style={{ padding: '8px 12px', backgroundColor: '#eff6ff', borderRadius: '8px', border: '1px solid #bfdbfe', minWidth: '140px' }}>
-                      <div style={{ fontSize: '9px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', textAlign: 'left' }}>🤢 Sick Leave (MC)</div>
+                      <div style={{ fontSize: '9px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', textAlign: 'center' }}>🤢 Sick Leave (MC)</div>
                       <div style={{ display: 'flex', marginTop: '4px' }}>
                         <div style={{ flex: 1, textAlign: 'center' }}>
                           <div style={{ fontSize: '8px', color: '#6b7280' }}>Used</div>

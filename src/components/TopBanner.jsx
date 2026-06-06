@@ -8,14 +8,17 @@ export default function TopBanner({ profile, activeMenu, onLogout }) {
       case 'history': return '📜 Leave History'
       case 'approval': return '📋 Leave Approval'
       case 'manage_staff': return '👥 Manage Staff Profiles'
+      case 'manage_personal_leave': return '📝 Manage Staff Leave'
       case 'leave_type': return '🗂️ Leave Type Configuration'
       case 'shift_type': return '📅 Shift Type Configuration'
       case 'public_holiday': return '📆 Yearly Public Holidays'
       case 'daily_report': return '📋 Daily Leave Report'
       case 'update_password': return '🔐 Update Password'
+      case 'system_settings': return '⚙️ System Settings'
       case 'monthly_report': return '📈 Monthly Leave Report'
       case 'manage_department':return '🏢 Manage Corporate Departments'
       case 'manage_access': return '🔒 Access Control Management'
+      case 'my_messages': return '✉️ My Messages'
       default: return 'Tien Tien E-Leave System'
     }
   }
@@ -37,7 +40,7 @@ export default function TopBanner({ profile, activeMenu, onLogout }) {
       </div>
 
       {/* Active Page Title */}
-      <div style={{ fontSize: '18px', fontWeight: '700', color: '#111827' }}>
+      <div style={{ fontSize: '18px', fontWeight: '700', color: '#111827' }}> 
         {getPageTitle()}
       </div>
 

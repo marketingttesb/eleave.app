@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 
-export default function Topbar({ profile, activeMenu, setActiveMenu }) {
+export default function Topbar({ profile, activeMenu, setActiveMenu, unreadCount }) {
   const [hoverMenu, setHoverMenu] = useState(null)
 
   const navStyle = {
@@ -267,20 +267,80 @@ export default function Topbar({ profile, activeMenu, setActiveMenu }) {
 
       {/* Menu Personal (Sebelah Kanan) */}
       <div 
-        style={itemStyle('update_password')}
+        style={itemStyle(['update_password', 'my_messages', 'system_settings'])}
         onMouseEnter={() => setHoverMenu('personal')}
         onMouseLeave={() => setHoverMenu(null)}
       >
         <span>👤</span> Personal ▾
+        {unreadCount > 0 && (
+          <div style={{ 
+            position: 'absolute', 
+            top: '8px', 
+            right: '6px', 
+            backgroundColor: '#ef4444', 
+            color: 'white', 
+            borderRadius: '50%', 
+            width: '18px', 
+            height: '18px', 
+            fontSize: '10px', 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            fontWeight: 'bold',
+            border: '2px solid #212529', // Garisan luar mengikut warna latar bar menu
+            pointerEvents: 'none'
+          }}>
+            {unreadCount}
+          </div>
+        )}
         {hoverMenu === 'personal' && (
           <div style={{ ...dropdownStyle, left: 'auto', right: 0 }}>
+            
+            
+            <div
+              style={{...dropdownItemStyle('my_messages'), position: 'relative'}}
+              onClick={() => { setActiveMenu('my_messages'); setHoverMenu(null); }} // No additional data needed for MyMsg itself
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e9ecef'; e.currentTarget.style.color = '#212529'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = activeMenu === 'my_messages' ? '#e9ecef' : 'transparent'; e.currentTarget.style.color = activeMenu === 'my_messages' ? '#212529' : '#343a40'; }}
+            >
+              <span>✉️</span> My Messages
+              {unreadCount > 0 && (
+                <div style={{ 
+                  position: 'absolute', 
+                  top: '8px', 
+                  right: '15px', 
+                  backgroundColor: '#ef4444', 
+                  color: 'white', 
+                  borderRadius: '50%', 
+                  width: '18px', 
+                  height: '18px', 
+                  fontSize: '11px', 
+                  display: 'flex', 
+                  justifyContent: 'center', 
+                  alignItems: 'center', 
+                  fontWeight: 'bold' 
+                }}>
+                  {unreadCount}
+                </div>
+              )}
+            </div>
+
             <div
               style={dropdownItemStyle('update_password')}
               onClick={() => { setActiveMenu('update_password'); setHoverMenu(null); }}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e9ecef'; e.currentTarget.style.color = '#212529'; }}
               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = activeMenu === 'update_password' ? '#e9ecef' : 'transparent'; e.currentTarget.style.color = activeMenu === 'update_password' ? '#212529' : '#343a40'; }}
             >
-              <span>🔐</span> Password
+              <span>🔐</span> My Password
+            </div>
+
+            <div
+              style={dropdownItemStyle('system_settings')}
+              onClick={() => { setActiveMenu('system_settings'); setHoverMenu(null); }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e9ecef'; e.currentTarget.style.color = '#212529'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = activeMenu === 'system_settings' ? '#e9ecef' : 'transparent'; e.currentTarget.style.color = activeMenu === 'system_settings' ? '#212529' : '#343a40'; }}
+            >
+              <span>⚙️</span> System Settings
             </div>
           </div>
         )}

@@ -3,7 +3,7 @@ import Flatpickr from "react-flatpickr"
 import "flatpickr/dist/themes/light.css"
 import { format, parseISO } from "date-fns"
 
-export default function ManagePersonalLeave({ supabase, profile }) {
+export default function ManagePersonalLeave({ supabase, profile, initialStaffId }) {
   const [staffList, setStaffList] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedStaffId, setSelectedStaffId] = useState(null)
@@ -77,6 +77,10 @@ export default function ManagePersonalLeave({ supabase, profile }) {
   useEffect(() => {
     if (selectedStaffId) {
       fetchStaffLeaveData()
+    } else if (initialStaffId) {
+      // If initialStaffId is provided and no staff is currently selected, set it.
+      // This will trigger fetchStaffLeaveData in the next render cycle due to selectedStaffId change.
+      setSelectedStaffId(initialStaffId);
     } else {
       setLeaveHistory([])
       setEligibilityRecord(null)
@@ -414,6 +418,15 @@ export default function ManagePersonalLeave({ supabase, profile }) {
         }
       }
 
+      // Notify staff member of the manual adjustment
+      await supabase.from('notifications').insert({
+        user_id: selectedStaffId,
+        related_user_id: selectedStaffId, // The affected staff's ID
+        title: 'Leave Record Adjusted',
+        message: `An HR administrator has ${modalMode === 'add' ? 'added' : 'updated'} a leave record for ${formDate}.`,
+        type: 'manual_change'
+      });
+
       alert("Leave saved successfully!")
       setShowModal(false)
       fetchStaffLeaveData()
@@ -447,6 +460,15 @@ export default function ManagePersonalLeave({ supabase, profile }) {
           await adjustLeaveBalance(selectedStaffId, leaveYear, -parseFloat(leave.duration_value), true)
         }
       }
+
+      // Notify staff member of the removal
+      await supabase.from('notifications').insert({
+        user_id: selectedStaffId,
+        related_user_id: selectedStaffId, // The affected staff's ID
+        title: 'Leave Record Removed',
+        message: `An HR administrator has removed your leave record for ${leave.leave_date}.`,
+        type: 'manual_change'
+      });
 
       alert("Leave deleted successfully.")
       fetchStaffLeaveData()
@@ -604,7 +626,7 @@ export default function ManagePersonalLeave({ supabase, profile }) {
                   gap: '4px',
                   minWidth: '200px'
                 }}>
-                  <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign : 'center' }}>
                     📅 Annual Leave
                   </div>
                   <div style={{ display: 'flex', marginTop: '2px' }}>
@@ -640,7 +662,7 @@ export default function ManagePersonalLeave({ supabase, profile }) {
                   gap: '4px',
                   minWidth: '200px'
                 }}>
-                  <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign : 'center' }}>
                     🤢 Sick Leave (MC)
                   </div>
                   <div style={{ display: 'flex', marginTop: '2px' }}>

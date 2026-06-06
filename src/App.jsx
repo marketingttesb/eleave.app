@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { check } from '@tauri-apps/plugin-updater'
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
+import { TrayIcon } from '@tauri-apps/api/tray'
+import { Menu } from '@tauri-apps/api/menu'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { enable, isEnabled } from '@tauri-apps/plugin-autostart'
 
 // Import our new decoupled items
 import TopBanner from './components/TopBanner'
@@ -17,6 +22,8 @@ import UpdatePassword from './pages/UpdatePassword'
 import MonthlyReport from './pages/MonthlyReport'
 import DailyReport from './pages/DailyReport'
 import ManagePersonalLeave from './pages/ManagePersonalLeave'
+import SystemSettings from './pages/SystemSettings'
+import MyMsg from './components/MyMsg'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -28,8 +35,18 @@ export default function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [authError, setAuthError] = useState('')
-  const [activeMenu, setActiveMenu] = useState('dashboard')
+  const [authError, setAuthError] = useState('') // State for authentication errors
+  const [activeMenu, setActiveMenu] = useState({ page: 'dashboard', data: {} }) // activeMenu is now an object
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  const fetchUnreadCount = async (userId) => {
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('is_read', false)
+    if (!error) setUnreadCount(count || 0)
+  }
 
   useEffect(() => {
     const checkForUpdates = async () => {
@@ -47,23 +64,172 @@ export default function App() {
       }
     };
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session) fetchProfile(session.user.id)
-    })
+    const setupTray = async (window) => {
+      try {
+        // Pastikan kita tidak membuat tray berlapis jika komponen di-mount semula
+        const existingTray = await TrayIcon.getById('main-tray');
+        if (existingTray) return;
+
+        // Cipta Menu untuk Tray
+        const menu = await Menu.new({
+          items: [
+            {
+              text: 'Show e-Leave',
+              action: () => {
+                window.show();
+                window.setFocus();
+              }
+            },
+            {
+              text: 'Quit Application',
+              action: () => appWindow.destroy() // Guna destroy untuk tutup terus tanpa trigger preventDefault
+            }
+          ]
+        });
+
+        // Inisialisasi Tray Icon
+        await TrayIcon.new({
+          id: 'main-tray',
+          menu,
+          tooltip: 'Tien Tien E-Leave System',
+          action: (event) => {
+            // Restore window pada klik kiri atau double click
+            if ((event.type === 'Click' && event.button === 'Left') || event.type === 'DoubleClick') {
+              window.show();
+              window.setFocus();
+            }
+          }
+        });
+      } catch (err) {
+        console.error('Tray initialization error:', err);
+      }
+    };
+
+    let notificationChannel = null;
+
+    const setupNotificationListener = (userId) => {
+      // If we already have a channel for this user, don't re-subscribe
+      if (notificationChannel && notificationChannel.topic.includes(userId)) return;
+
+      if (notificationChannel) {
+        supabase.removeChannel(notificationChannel);
+        notificationChannel = null;
+      }
+
+      notificationChannel = supabase
+        .channel(`public:notifications:${userId}`)
+        .on('postgres_changes', { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'notifications',
+          filter: `user_id=eq.${userId}` 
+        }, payload => {
+          console.log('Notification received:', payload.new);
+          
+          // DEBUG FALLBACK: If Realtime works, this browser alert WILL show up
+          // even if the OS desktop notification is blocked.
+          alert(`🔔 ${payload.new.title}\n${payload.new.message}`);
+
+          setUnreadCount(prev => prev + 1);
+
+          try {
+            sendNotification({ 
+              title: payload.new.title, 
+              body: payload.new.message 
+            });
+          } catch (e) {
+            console.error("Native notification failed:", e);
+          }
+        })
+        .subscribe();
+    };
+
+    const appWindow = getCurrentWindow();
+
+    // Daftarkan listener penutupan tingkap secepat mungkin
+    const registerCloseListener = async () => {
+      await appWindow.onCloseRequested(async (event) => {
+        // Walaupun Rust sudah buat, kita prevent di JS juga untuk keselamatan
+        event.preventDefault(); 
+        await appWindow.hide(); 
+
+        // Papar notifikasi "Masih berjalan" sekali sahaja
+        const hasNotified = localStorage.getItem('tray_minimized_notified');
+        if (!hasNotified) {
+          try {
+            await sendNotification({
+              title: 'e-Leave System',
+              body: 'Aplikasi masih berjalan di latar belakang (System Tray).'
+            });
+            localStorage.setItem('tray_minimized_notified', 'true');
+          } catch (e) {
+            console.error("Gagal menghantar notifikasi tray:", e);
+          }
+        }
+      });
+    };
+
+    // Minimize → sembunyikan ke tray
+    const registerMinimizeListener = async () => {
+      await appWindow.onMinimize(async () => {
+        await appWindow.hide();
+      });
+    };
+
+    const initApp = async () => {
+      // Request Tauri Notification Permission
+      try {
+        const permission = await isPermissionGranted();
+        if (!permission) await requestPermission();
+      } catch (err) {
+        console.warn("Notification permissions could not be requested:", err);
+      }
+
+      // Auto-enable Autostart on first run (Default Clicked)
+      try {
+        const enabled = await isEnabled();
+        const preferenceSet = localStorage.getItem('autostart_preference_set');
+        if (!enabled && !preferenceSet) {
+          await enable();
+          localStorage.setItem('autostart_preference_set', 'true');
+        }
+      } catch (err) {
+        console.error("Failed to init autostart:", err);
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      setSession(session);
+      if (session) {
+        fetchProfile(session.user.id);
+        fetchUnreadCount(session.user.id);
+      }
+    };
+
+    // Jalankan pendaftaran kritikal dahulu
+    registerCloseListener();
+    registerMinimizeListener();
+    setupTray(appWindow);
+    initApp();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session) {
         checkForUpdates();
         fetchProfile(session.user.id)
+        fetchUnreadCount(session.user.id);
+        setupNotificationListener(session.user.id);
       } else {
         setProfile(null)
         setActiveMenu('dashboard')
+        if (notificationChannel) supabase.removeChannel(notificationChannel);
       }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      subscription.unsubscribe();
+      if (notificationChannel) supabase.removeChannel(notificationChannel);
+    };
   }, [])
 
   const fetchProfile = async (userId) => {
@@ -107,7 +273,11 @@ export default function App() {
 
   // Simple clean switch workspace switcher
   const renderContent = () => {
-    switch (activeMenu) {
+    // Dapatkan nama halaman sama ada activeMenu adalah string atau objek
+    const page = typeof activeMenu === 'string' ? activeMenu : activeMenu.page;
+    const data = typeof activeMenu === 'string' ? {} : (activeMenu.data || {});
+
+    switch (page) {
       case 'dashboard':
         return <Dashboard supabase={supabase} profile={profile} />
       
@@ -137,15 +307,38 @@ export default function App() {
             supabase={supabase} 
             profile={profile} 
             onActionSuccess={() => fetchProfile(session.user.id)} 
+            initialApplicantId={data.applicantId}
+            initialCreatedAt={data.createdAt}
+          />
+        )
+
+      case 'manage_personal_leave':
+        return (
+          <ManagePersonalLeave 
+            supabase={supabase} 
+            profile={profile} 
+            initialStaffId={data.staffId} 
+          />
+        )
+
+      case 'my_messages':
+        return (
+          <MyMsg 
+            supabase={supabase} 
+            profile={profile} 
+            setActiveMenu={setActiveMenu}
+            onMarkRead={() => fetchUnreadCount(profile.id)} 
           />
         )
 
       case 'update_password':
         return <UpdatePassword supabase={supabase} />
 
+      case 'system_settings':
+        return <SystemSettings />
+
       //case 'manage_staff': return <div style={cardStyle}><h3>👥 Manage Staff Profiles</h3></div>
-      case 'manage_staff': return <ManageStaff supabase={supabase} />
-      case 'manage_personal_leave': return <ManagePersonalLeave supabase={supabase} profile={profile} />
+      case 'manage_staff': return <ManageStaff supabase={supabase} /> // No change needed here
       case 'leave_type': return <div style={cardStyle}><h3>🗂️ Leave Type Configuration</h3></div>; // This is a placeholder, not implemented yet
       case 'manage_department':return <ManageDepartments supabase={supabase} />
       case 'shift_type': return <div style={cardStyle}><h3>📅 Shift Type Configuration</h3></div>; // This is a placeholder, not implemented yet
@@ -176,10 +369,18 @@ export default function App() {
 
   if (!profile) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: 'sans-serif', color: '#4f46e5', fontWeight: 'bold' }}>Loading system...</div>
 
+  // Tentukan halaman aktif untuk kegunaan UI (highlight menu)
+  const currentPage = typeof activeMenu === 'string' ? activeMenu : activeMenu.page;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'sans-serif', backgroundColor: '#f3f4f6' }}>
-      <TopBanner profile={profile} activeMenu={activeMenu} onLogout={handleLogout} />
-      <Topbar profile={profile} activeMenu={activeMenu} setActiveMenu={setActiveMenu} />
+      <TopBanner profile={profile} activeMenu={currentPage} onLogout={handleLogout} />
+      <Topbar 
+        profile={profile} 
+        activeMenu={currentPage} 
+        setActiveMenu={setActiveMenu} 
+        unreadCount={unreadCount}
+      />
       
       <div style={{ flex: 1, padding: '40px', overflowY: 'auto' }}>
         {renderContent()}

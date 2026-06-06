@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Build secrets
+Build.txt
+
+# Temp artifacts
+src-tauri/2

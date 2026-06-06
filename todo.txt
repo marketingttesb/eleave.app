@@ -1,0 +1,7 @@
+[x] Start with Windows (Autostart enabled by default)
+[x] Close → Minimize to tray
+[x] Minimize → Minimize to tray
+[x] Notification "App still running in tray" once
+[x] Double click tray icon → Restore window
+[x] Right click tray icon → Show / Quit
+[x] Single instance only (Focus on main window)
