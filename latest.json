@@ -1,0 +1,11 @@
+{
+    "version": "0.1.4",
+    "notes": "Eligibility pills, bundle edit, notification redirect fixes, pending HR popup, window title fix",
+    "pub_date": "2026-06-13T02:50:00Z",
+    "platforms": {
+        "windows-x86_64": {
+            "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUMmZjSDArUHVZVHB0ZGRtM2xCUlVzNGJrQ0UvVjNReWxZY1I4UDNlVFFQak03SDRaRjFPUGtLc2oyalgxbHRQeUp0c3J4UTNjYVRNK3hDbzFQVE9OSEJSekxPcUR0a0FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgxMzE4OTMyCWZpbGU6VGllbiBUaWVuIEUtTGVhdmVfMC4xLjRfeDY0X2VuLVVTLm1zaQpBVUxjUjVvNlRLMlN4UjBQVWYrV3A3ay9wcnp1MWRoQ0VVS3VqaDhwWnB3Ukx4cUtRbUIrbUVXSGNRVVMrK0w1L2txeDFTR1ZRSGJEUVdUemxNTmNBUT09Cg==",
+            "url": "https://github.com/marketingttesb/eleave.app/releases/download/v0.1.4/Tien-Tien-E-Leave_0.1.4_x64_en-US.msi"
+        }
+    }
+}
