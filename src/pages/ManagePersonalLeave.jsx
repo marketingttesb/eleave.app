@@ -22,6 +22,10 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
   const [durations, setDurations] = useState([])
   const [publicHolidays, setPublicHolidays] = useState([])
 
+  // Pending HR review tracking
+  const [staffPendingHR, setStaffPendingHR] = useState({}) // { staff_id: count }
+  const [showPendingOnly, setShowPendingOnly] = useState(false)
+
   // Loading states
   const [loadingStaff, setLoadingStaff] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
@@ -38,6 +42,15 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
   const [formDurationId, setFormDurationId] = useState('')
   const [formStatus, setFormStatus] = useState('Pending')
   const [formReason, setFormReason] = useState('')
+
+  // Bundle edit states
+  const [selectedLeaveIds, setSelectedLeaveIds] = useState(new Set())
+  const [showBulkModal, setShowBulkModal] = useState(false)
+  const [bulkLeaveType, setBulkLeaveType] = useState('')
+  const [bulkStatus, setBulkStatus] = useState('Approved')
+
+  // Pending review popup
+  const [showPendingAlert, setShowPendingAlert] = useState(false)
 
   // Styling helpers
   const cardStyle = { 
@@ -77,6 +90,12 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
   useEffect(() => {
     if (selectedStaffId) {
       fetchStaffLeaveData()
+      // Reset selection on staff change
+      setSelectedLeaveIds(new Set())
+      // Show pending alert if staff has pending HR review items
+      if (staffPendingHR[selectedStaffId] > 0) {
+        setShowPendingAlert(true)
+      }
     } else if (initialStaffId) {
       // If initialStaffId is provided and no staff is currently selected, set it.
       // This will trigger fetchStaffLeaveData in the next render cycle due to selectedStaffId change.
@@ -142,6 +161,20 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
 
       if (error) throw error
       setStaffList(data || [])
+
+      // Fetch pending HR review counts per staff
+      const { data: pendingData } = await supabase
+        .from('leave_applications')
+        .select('staff_id')
+        .eq('needs_hr_review', true)
+
+      if (pendingData) {
+        const counts = {}
+        pendingData.forEach(item => {
+          counts[item.staff_id] = (counts[item.staff_id] || 0) + 1
+        })
+        setStaffPendingHR(counts)
+      }
     } catch (err) {
       console.error("Error fetching staff list:", err)
       alert("Failed to load staff list: " + err.message)
@@ -361,6 +394,11 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
         approver_id: selectedStaffObj?.report_to || null
       }
 
+      // If HR is reviewing, clear the needs_hr_review flag
+      if (editingLeave?.needs_hr_review === true) {
+        payload.needs_hr_review = false
+      }
+
       if (modalMode === 'add') {
         // --- ADD LEAVE APPLICATION ---
         const { error: insertError } = await supabase
@@ -387,11 +425,13 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
         if (updateError) throw updateError
 
         // Calculate adjustments for Annual Leave
-        const oldDeduction = (editingLeave.status === 'Approved' && editingLeave.leave_type === 'Annual Leave') ? parseFloat(editingLeave.duration_value) : 0
+        // For needs_hr_review records, HOD approved but didn't deduct balance
+        const wasDeducted = editingLeave?.needs_hr_review !== true
+        const oldDeduction = (wasDeducted && editingLeave.status === 'Approved' && editingLeave.leave_type === 'Annual Leave') ? parseFloat(editingLeave.duration_value) : 0
         const newDeduction = (formStatus === 'Approved' && formLeaveType === 'Annual Leave') ? durationObj.duration_value : 0
 
         // Calculate adjustments for Sick Leave (MC)
-        const oldMcDeduction = (editingLeave.status === 'Approved' && editingLeave.leave_type === 'Sick Leave - MC') ? parseFloat(editingLeave.duration_value) : 0
+        const oldMcDeduction = (wasDeducted && editingLeave.status === 'Approved' && editingLeave.leave_type === 'Sick Leave - MC') ? parseFloat(editingLeave.duration_value) : 0
         const newMcDeduction = (formStatus === 'Approved' && formLeaveType === 'Sick Leave - MC') ? durationObj.duration_value : 0
 
         const oldYear = new Date(editingLeave.leave_date).getFullYear()
@@ -419,13 +459,14 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
       }
 
       // Notify staff member of the manual adjustment
-      await supabase.from('notifications').insert({
+      const { error: notifError } = await supabase.from('notifications').insert({
         user_id: selectedStaffId,
-        related_user_id: selectedStaffId, // The affected staff's ID
+        related_user_id: selectedStaffId,
         title: 'Leave Record Adjusted',
         message: `An HR administrator has ${modalMode === 'add' ? 'added' : 'updated'} a leave record for ${formDate}.`,
         type: 'manual_change'
       });
+      if (notifError) console.error('Notification insert failed:', notifError.message);
 
       alert("Leave saved successfully!")
       setShowModal(false)
@@ -451,8 +492,8 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
 
       if (deleteError) throw deleteError
 
-      // Refund balance if it was approved annual leave or sick leave (MC)
-      if (leave.status === 'Approved') {
+      // Refund balance if it was already deducted (not a needs_hr_review record)
+      if (leave.status === 'Approved' && leave.needs_hr_review !== true) {
         const leaveYear = new Date(leave.leave_date).getFullYear()
         if (leave.leave_type === 'Annual Leave') {
           await adjustLeaveBalance(selectedStaffId, leaveYear, -parseFloat(leave.duration_value), false)
@@ -462,13 +503,14 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
       }
 
       // Notify staff member of the removal
-      await supabase.from('notifications').insert({
+      const { error: notifError } = await supabase.from('notifications').insert({
         user_id: selectedStaffId,
-        related_user_id: selectedStaffId, // The affected staff's ID
+        related_user_id: selectedStaffId,
         title: 'Leave Record Removed',
         message: `An HR administrator has removed your leave record for ${leave.leave_date}.`,
         type: 'manual_change'
       });
+      if (notifError) console.error('Notification insert failed:', notifError.message);
 
       alert("Leave deleted successfully.")
       fetchStaffLeaveData()
@@ -480,6 +522,112 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
     }
   }
 
+  // Toggle a single leave record selection
+  const toggleLeaveSelection = (id) => {
+    setSelectedLeaveIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Select / deselect all displayed leaves
+  const toggleSelectAll = () => {
+    if (selectedLeaveIds.size === displayedLeaves.length) {
+      setSelectedLeaveIds(new Set())
+    } else {
+      setSelectedLeaveIds(new Set(displayedLeaves.map(l => l.id)))
+    }
+  }
+
+  const handleBulkSaveLeave = async (e) => {
+    e.preventDefault()
+    if (selectedLeaveIds.size === 0) {
+      alert("No leave records selected.")
+      return
+    }
+    if (!bulkLeaveType) {
+      alert("Please select a leave type.")
+      return
+    }
+
+    setLoadingAction(true)
+    try {
+      const selectedLeaves = leaveHistory.filter(l => selectedLeaveIds.has(l.id))
+      const affectedDates = []
+
+      for (const leave of selectedLeaves) {
+        const durationVal = parseFloat(leave.duration_value)
+        const leaveYear = new Date(leave.leave_date).getFullYear()
+
+        // Calculate balance adjustments per record
+        const wasDeducted = leave.needs_hr_review !== true
+        const oldDeduction = (wasDeducted && leave.status === 'Approved' && leave.leave_type === 'Annual Leave') ? durationVal : 0
+        const oldMcDeduction = (wasDeducted && leave.status === 'Approved' && leave.leave_type === 'Sick Leave - MC') ? durationVal : 0
+        const newDeduction = (bulkStatus === 'Approved' && bulkLeaveType === 'Annual Leave') ? durationVal : 0
+        const newMcDeduction = (bulkStatus === 'Approved' && bulkLeaveType === 'Sick Leave - MC') ? durationVal : 0
+
+        // Build payload
+        const payload = {
+          leave_type: bulkLeaveType,
+          status: bulkStatus,
+          processed_by: (bulkStatus === 'Approved' || bulkStatus === 'Rejected') ? profile.id : null,
+          processed_at: (bulkStatus === 'Approved' || bulkStatus === 'Rejected') ? new Date().toISOString() : null,
+        }
+
+        if (leave.needs_hr_review === true) {
+          payload.needs_hr_review = false
+        }
+
+        const { error: updateError } = await supabase
+          .from('leave_applications')
+          .update(payload)
+          .eq('id', leave.id)
+
+        if (updateError) throw updateError
+
+        // Balance adjustment
+        const diff = newDeduction - oldDeduction
+        const mcDiff = newMcDeduction - oldMcDeduction
+        if (diff !== 0) await adjustLeaveBalance(selectedStaffId, leaveYear, diff, false)
+        if (mcDiff !== 0) await adjustLeaveBalance(selectedStaffId, leaveYear, mcDiff, true)
+
+        affectedDates.push(leave.leave_date)
+      }
+
+      // Single notification for the whole bundle
+      const dateStr = affectedDates.length <= 3
+        ? affectedDates.join(', ')
+        : `${affectedDates[0]} … (+${affectedDates.length - 1} more)`
+
+      const { error: notifError } = await supabase.from('notifications').insert({
+        user_id: selectedStaffId,
+        related_user_id: selectedStaffId,
+        title: 'Leave Record Adjusted',
+        message: `An HR administrator has updated ${affectedDates.length} leave record(s) (${dateStr}).`,
+        type: 'manual_change'
+      })
+      if (notifError) console.error('Bulk notification insert failed:', notifError.message)
+
+      alert(`Successfully updated ${selectedLeaveIds.size} leave record(s).`)
+      setShowBulkModal(false)
+      setSelectedLeaveIds(new Set())
+      fetchStaffLeaveData()
+    } catch (err) {
+      console.error("Error in bulk edit:", err)
+      alert("Error updating records: " + err.message)
+    } finally {
+      setLoadingAction(false)
+    }
+  }
+
+  const handleOpenBulkModal = () => {
+    setBulkLeaveType('')
+    setBulkStatus('Approved')
+    setShowBulkModal(true)
+  }
+
   // Filter staff list based on query and department
   const filteredStaffList = staffList.filter(s => {
     const matchesSearch = s.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -487,6 +635,11 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
     const matchesDept = selectedDeptId === 'All' || String(s.department_id || s.departments?.id) === String(selectedDeptId)
     return matchesSearch && matchesDept
   })
+
+  // Filter leaves for pending-only view
+  const displayedLeaves = showPendingOnly
+    ? leaveHistory.filter(l => l.needs_hr_review === true)
+    : leaveHistory
 
   // Years for dropdown
   const currentYear = new Date().getFullYear()
@@ -552,7 +705,22 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
                   }
                 }}
               >
-                <div style={{ fontWeight: '700', fontSize: '14px', color: '#111827' }}>{staff.full_name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontWeight: '700', fontSize: '14px', color: '#111827' }}>{staff.full_name}</span>
+                  {staffPendingHR[staff.id] > 0 && (
+                    <span style={{ 
+                      fontSize: '10px', 
+                      padding: '2px 7px', 
+                      borderRadius: '10px', 
+                      fontWeight: '800',
+                      backgroundColor: '#fffbeb',
+                      color: '#d97706',
+                      border: '1px solid #fde68a'
+                    }}>
+                      ⚠️ {staffPendingHR[staff.id]}
+                    </span>
+                  )}
+                </div>
                 <div style={{ fontSize: '12px', color: '#4b5563', marginTop: '2px' }}>{staff.position || '—'}</div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
                   <span style={{ fontSize: '10px', color: '#9ca3af' }}>{staff.departments?.name || 'No Dept'}</span>
@@ -689,53 +857,124 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
               </div>
             </div>
 
-            {/* Year selector & Action Buttons */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '14px', fontWeight: '600', color: '#374151' }}>Year:</span>
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #d1d5db',
-                    fontSize: '14px',
-                    backgroundColor: 'white',
-                    fontWeight: '600'
-                  }}
-                >
-                  {years.map(yr => (
-                    <option key={yr} value={yr}>{yr}</option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                onClick={handleOpenAddModal}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#4f46e5',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '13px',
+            {/* Pending HR Review Banner */}
+            {(() => {
+              const pendingLeaves = leaveHistory.filter(l => l.needs_hr_review === true)
+              if (pendingLeaves.length === 0) return null
+              return (
+                <div style={{ 
+                  padding: '12px 16px', 
+                  backgroundColor: '#fffbeb', 
+                  borderRadius: '8px', 
+                  border: '1px solid #fde68a',
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                ➕ Add Staff Leave
-              </button>
-            </div>
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#92400e' }}>
+                    ⚠️ {pendingLeaves.length} leave(s) pending HR classification
+                  </div>
+                  <button
+                    onClick={() => setShowPendingOnly(!showPendingOnly)}
+                    style={{
+                      padding: '6px 14px',
+                      backgroundColor: showPendingOnly ? '#d97706' : 'white',
+                      color: showPendingOnly ? 'white' : '#92400e',
+                      border: '1px solid #d97706',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {showPendingOnly ? 'Show All' : 'Show Pending Only'}
+                  </button>
+                </div>
+              )
+            })()}
+
+            {/* Year selector & Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: '600', color: '#374151' }}>Year:</span>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #d1d5db',
+                      fontSize: '14px',
+                      backgroundColor: 'white',
+                      fontWeight: '600'
+                    }}
+                  >
+                    {years.map(yr => (
+                      <option key={yr} value={yr}>{yr}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  {selectedLeaveIds.size > 0 && (
+                    <>
+                      <span style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600' }}>
+                        {selectedLeaveIds.size} selected
+                      </span>
+                      <button
+                        onClick={handleOpenBulkModal}
+                        style={{
+                          padding: '8px 16px',
+                          backgroundColor: '#d97706',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontWeight: '600',
+                          fontSize: '13px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        📦 Bulk Edit
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={handleOpenAddModal}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: '#4f46e5',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '600',
+                      fontSize: '13px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    ➕ Add Staff Leave
+                  </button>
+                </div>
+              </div>
 
             {/* Leave applications list table */}
             <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead style={{ backgroundColor: '#f9fafb', position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                    <th style={{ padding: '12px 12px', fontSize: '12px', fontWeight: '600', color: '#4b5563', width: '40px', textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={displayedLeaves.length > 0 && selectedLeaveIds.size === displayedLeaves.length}
+                        onChange={toggleSelectAll}
+                        style={{ cursor: 'pointer', accentColor: '#4f46e5' }}
+                      />
+                    </th>
                     <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '600', color: '#4b5563' }}>Date</th>
                     <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '600', color: '#4b5563' }}>Leave Type</th>
                     <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '600', color: '#4b5563' }}>Duration</th>
@@ -747,19 +986,32 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
                 <tbody>
                   {loadingHistory ? (
                     <tr>
-                      <td colSpan="6" style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
+                      <td colSpan="7" style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
                         Loading leave records...
                       </td>
                     </tr>
-                  ) : leaveHistory.length === 0 ? (
+                  ) : displayedLeaves.length === 0 ? (
                     <tr>
-                      <td colSpan="6" style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
-                        No leave records found for year {selectedYear}.
+                      <td colSpan="7" style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
+                        {showPendingOnly ? 'No pending HR reviews.' : `No leave records found for year ${selectedYear}.`}
                       </td>
                     </tr>
                   ) : (
-                    leaveHistory.map((leave) => (
-                      <tr key={leave.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                    displayedLeaves.map((leave) => {
+                      const isPendingHR = leave.needs_hr_review === true
+                      return (
+                      <tr key={leave.id} style={{ 
+                        borderBottom: '1px solid #e5e7eb',
+                        backgroundColor: isPendingHR ? '#fffbeb' : 'white'
+                      }}>
+                        <td style={{ padding: '12px 12px', textAlign: 'center', width: '40px' }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedLeaveIds.has(leave.id)}
+                            onChange={() => toggleLeaveSelection(leave.id)}
+                            style={{ cursor: 'pointer', accentColor: '#4f46e5' }}
+                          />
+                        </td>
                         <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '600', color: '#111827' }}>
                           {leave.leave_date}
                         </td>
@@ -773,6 +1025,18 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
                           {leave.reason || '—'}
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          {isPendingHR ? (
+                            <span style={{ 
+                              fontSize: '11px', 
+                              padding: '3px 8px', 
+                              borderRadius: '10px', 
+                              fontWeight: '700',
+                              backgroundColor: '#fef3c7',
+                              color: '#d97706'
+                            }}>
+                              Needs Classification
+                            </span>
+                          ) : (
                           <span style={{ 
                             fontSize: '11px', 
                             padding: '3px 8px', 
@@ -783,6 +1047,7 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
                           }}>
                             {leave.status}
                           </span>
+                          )}
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
@@ -821,8 +1086,8 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
                           </div>
                         </td>
                       </tr>
-                    ))
-                  )}
+                    )
+                  }))}
                 </tbody>
               </table>
             </div>
@@ -860,6 +1125,20 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
             <p style={{ color: '#6b7280', fontSize: '13px', margin: '0 0 16px 0' }}>
               Employee: <strong>{selectedStaffObj?.full_name}</strong>
             </p>
+
+            {editingLeave?.needs_hr_review === true && (
+              <div style={{ 
+                padding: '10px 14px', 
+                backgroundColor: '#fffbeb', 
+                borderRadius: '8px', 
+                border: '1px solid #fde68a',
+                marginBottom: '8px'
+              }}>
+                <span style={{ fontSize: '13px', fontWeight: '700', color: '#92400e' }}>
+                  ⚠️ This leave needs HR classification. Please set the final leave type.
+                </span>
+              </div>
+            )}
 
             <form onSubmit={handleSaveLeave} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               
@@ -969,6 +1248,168 @@ export default function ManagePersonalLeave({ supabase, profile, initialStaffId 
                 </button>
               </div>
 
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* PENDING HR REVIEW POPUP */}
+      {showPendingAlert && (
+        <div style={{ 
+          position: 'fixed', 
+          top: 0, left: 0, right: 0, bottom: 0, 
+          backgroundColor: 'rgba(15, 23, 42, 0.6)', 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          zIndex: 100 
+        }}>
+          <div style={{ 
+            backgroundColor: 'white', 
+            padding: '28px', 
+            borderRadius: '12px', 
+            width: '400px', 
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' 
+          }}>
+            <div style={{ fontSize: '40px', textAlign: 'center', marginBottom: '12px' }}>⚠️</div>
+            <h3 style={{ margin: '0 0 8px 0', color: '#92400e', fontSize: '18px', fontWeight: '700', textAlign: 'center' }}>
+              Pending HR Classification
+            </h3>
+            <p style={{ color: '#6b7280', fontSize: '14px', textAlign: 'center', margin: '0 0 20px 0' }}>
+              <strong>{selectedStaffObj?.full_name}</strong> has <strong>{staffPendingHR[selectedStaffId]}</strong> leave record(s) that need your classification.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+              <button
+                onClick={() => { setShowPendingAlert(false); setShowPendingOnly(true); }}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#d97706',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '700',
+                  fontSize: '14px'
+                }}
+              >
+                Classify Now
+              </button>
+              <button
+                onClick={() => setShowPendingAlert(false)}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  fontSize: '14px'
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK EDIT MODAL */}
+      {showBulkModal && (
+        <div style={{ 
+          position: 'fixed', 
+          top: 0, left: 0, right: 0, bottom: 0, 
+          backgroundColor: 'rgba(15, 23, 42, 0.6)', 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          zIndex: 100 
+        }}>
+          <div style={{ 
+            backgroundColor: 'white', 
+            padding: '24px', 
+            borderRadius: '12px', 
+            width: '420px', 
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' 
+          }}>
+            <h3 style={{ margin: '0 0 6px 0', color: '#111827', fontSize: '18px', fontWeight: '700' }}>
+              📦 Bulk Edit Leave Records
+            </h3>
+            <p style={{ color: '#6b7280', fontSize: '13px', margin: '0 0 16px 0' }}>
+              Employee: <strong>{selectedStaffObj?.full_name}</strong> &bull; {selectedLeaveIds.size} record(s) selected
+            </p>
+
+            <form onSubmit={handleBulkSaveLeave} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={labelStyle}>Leave Type *</label>
+                <select 
+                  value={bulkLeaveType} 
+                  onChange={(e) => setBulkLeaveType(e.target.value)} 
+                  style={{ ...inputStyle, backgroundColor: 'white' }}
+                  required
+                >
+                  <option value="">-- Select --</option>
+                  {leaveTypes.map(t => (
+                    <option key={t.id} value={t.type_name}>{t.type_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={labelStyle}>Status *</label>
+                <select 
+                  value={bulkStatus} 
+                  onChange={(e) => setBulkStatus(e.target.value)} 
+                  style={{ ...inputStyle, backgroundColor: 'white' }}
+                  required
+                >
+                  <option value="Approved">Approved</option>
+                  <option value="Rejected">Rejected</option>
+                  <option value="Pending">Pending</option>
+                </select>
+              </div>
+
+              <div style={{ backgroundColor: '#fef3c7', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                <span style={{ fontSize: '12px', color: '#92400e', fontWeight: '600' }}>
+                  ⚠️ This will update all {selectedLeaveIds.size} selected record(s). Balances will be adjusted for Annual Leave / Sick Leave - MC.
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                <button 
+                  type="button" 
+                  onClick={() => setShowBulkModal(false)} 
+                  disabled={loadingAction}
+                  style={{ 
+                    padding: '8px 16px', 
+                    backgroundColor: '#f3f4f6', 
+                    color: '#374151', 
+                    border: '1px solid #d1d5db', 
+                    borderRadius: '6px', 
+                    cursor: 'pointer', 
+                    fontWeight: '600', 
+                    fontSize: '13px' 
+                  }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={loadingAction}
+                  style={{ 
+                    padding: '8px 16px', 
+                    backgroundColor: '#d97706', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: '6px', 
+                    cursor: 'pointer', 
+                    fontWeight: '600', 
+                    fontSize: '13px' 
+                  }}
+                >
+                  {loadingAction ? 'Updating...' : `Update ${selectedLeaveIds.size} Record(s)`}
+                </button>
+              </div>
             </form>
           </div>
         </div>

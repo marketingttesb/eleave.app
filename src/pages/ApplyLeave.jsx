@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import Flatpickr from "react-flatpickr"
 import "flatpickr/dist/themes/light.css" // You can choose different themes
-import { format, parseISO } from "date-fns" // Useful for parsing dates
+import { format, parseISO, addDays } from "date-fns"
 
 export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) {
   const [leaveTypes, setLeaveTypes] = useState([])
@@ -16,9 +16,11 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
   const [reason, setReason] = useState('')
   const [addedDates, setAddedDates] = useState([]) // Simpan senarai tarikh yang dipilih
 
-  // Temp Input States (untuk baris "Tambah Cuti")
-  const [tempDate, setTempDate] = useState('')
-  const [tempDurationId, setTempDurationId] = useState('')
+  // Range Input States
+  const [tempRangeStart, setTempRangeStart] = useState('')
+  const [tempRangeEnd, setTempRangeEnd] = useState('')
+  const [rangeDurationId, setRangeDurationId] = useState('')
+  const [userDepartmentName, setUserDepartmentName] = useState('')
 
   const cardStyle = { 
     backgroundColor: 'white', 
@@ -69,10 +71,18 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
     }
     if (durs) {
       setDurations(durs)
-      if (durs.length > 0) setTempDurationId(durs[0].id)
+      if (durs.length > 0) {
+        const fullDay = durs.find(d => d.duration_name.toLowerCase().includes('full day'))
+        setRangeDurationId(fullDay ? fullDay.id : durs[0].id)
+      }
     }
     if (holidays) {
       setPublicHolidays(holidays.map(h => h.holiday_date))
+    }
+
+    if (profile?.department_id) {
+      const { data: dept } = await supabase.from('departments').select('name').eq('id', profile.department_id).single()
+      if (dept) setUserDepartmentName(dept.name)
     }
   }
 
@@ -94,83 +104,103 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
     return dateStr.substring(0, 10) // Extracts YYYY-MM-DD from ISO strings or date strings
   }
 
-  const addDateToList = () => {
-    if (!tempDate || !tempDurationId) {
-      alert("Please select both date and duration.")
+  const isWeekend = (date) => {
+    const day = date.getDay()
+    if (profile.working_days_type === '5_days') {
+      return day === 0 || day === 6
+    }
+    if (profile.working_days_type === '6_days') {
+      const dept = userDepartmentName.toLowerCase()
+      if (dept.includes('paka')) return day === 5
+      if (dept.includes('kuantan')) return day === 0
+    }
+    return false
+  }
+
+  const addDateRangeToList = () => {
+    if (!tempRangeStart || !tempRangeEnd || !rangeDurationId) {
+      alert("Please select From Date, To Date, and Duration.")
       return
     }
 
-    // Rule: Sekat permohonan pada hari Ahad
-    const dateObj = parseISO(tempDate)
-    if (dateObj.getDay() === 0) {
-      alert("Application Denied: Leave cannot be applied on Sundays.")
+    if (tempRangeStart > tempRangeEnd) {
+      alert("From Date must be before To Date.")
       return
     }
 
-    // Rule: Sekat permohonan pada tarikh Cuti Umum (Public Holiday)
-    if (publicHolidays.includes(tempDate)) {
-      alert("Application Denied: Selected date is a Public Holiday.")
-      return
+    const rangeDurationObj = durations.find(d => String(d.id) === String(rangeDurationId))
+    const allDates = []
+    let current = parseISO(tempRangeStart)
+    const end = parseISO(tempRangeEnd)
+    while (current <= end) {
+      allDates.push(format(current, "yyyy-MM-dd"))
+      current = addDays(current, 1)
     }
 
-    const newDurationObj = durations.find(d => String(d.id) === String(tempDurationId))
-    
-    // Rule: Semak pertindihan dalam form semasa & history
-    const existingOnThisDate = addedDates.filter(d => d.date === tempDate)
-    const existingInHistory = leaveHistory
-      .filter(h => h.leave_date === tempDate && h.status !== 'Rejected')
-    
-    const totalCurrent = existingOnThisDate.reduce((sum, d) => sum + d.durationValue, 0)
-    const totalHistory = existingInHistory.reduce((sum, h) => sum + h.duration_value, 0)
+    const added = []
+    const skipped = []
 
-    // Rule: Total 1.0 day per date
-    if (totalCurrent + totalHistory + newDurationObj.duration_value > 1.0) {
-      alert("Total leave duration for a single date cannot exceed 1 day.")
-      return
+    for (const dateStr of allDates) {
+      const dateObj = parseISO(dateStr)
+
+      if (isWeekend(dateObj)) {
+        skipped.push({ date: dateStr, reason: 'Weekend' })
+        continue
+      }
+      if (publicHolidays.includes(dateStr)) {
+        skipped.push({ date: dateStr, reason: 'Public Holiday' })
+        continue
+      }
+
+      const existingOnThisDate = addedDates.filter(d => d.date === dateStr)
+      const existingInHistory = leaveHistory.filter(h => h.leave_date === dateStr && h.status !== 'Rejected')
+      const totalCurrent = existingOnThisDate.reduce((sum, d) => sum + d.durationValue, 0)
+      const totalHistory = existingInHistory.reduce((sum, h) => sum + h.duration_value, 0)
+
+      if (totalCurrent + totalHistory + rangeDurationObj.duration_value > 1.0) {
+        skipped.push({ date: dateStr, reason: 'Overlapping with existing leave' })
+        continue
+      }
+
+      const isNewAM = rangeDurationObj.duration_name.toLowerCase().includes('am')
+      const isNewPM = rangeDurationObj.duration_name.toLowerCase().includes('pm')
+      const hasExistingAM = [...existingOnThisDate, ...existingInHistory.map(h => ({ durationName: h.duration_type }))]
+        .some(d => d.durationName.toLowerCase().includes('am'))
+      const hasExistingPM = [...existingOnThisDate, ...existingInHistory.map(h => ({ durationName: h.duration_type }))]
+        .some(d => d.durationName.toLowerCase().includes('pm'))
+
+      if (isNewAM && hasExistingAM) {
+        skipped.push({ date: dateStr, reason: 'AM slot already taken' })
+        continue
+      }
+      if (isNewPM && hasExistingPM) {
+        skipped.push({ date: dateStr, reason: 'PM slot already taken' })
+        continue
+      }
+
+      const dayName = format(dateObj, "EEEE")
+      added.push({
+        date: dateStr,
+        day: dayName,
+        durationName: rangeDurationObj.duration_name,
+        durationValue: rangeDurationObj.duration_value
+      })
     }
 
-    // Slot validation: Prevent duplicate AM or duplicate PM
-    const isNewAM = newDurationObj.duration_name.toLowerCase().includes('am')
-    const isNewPM = newDurationObj.duration_name.toLowerCase().includes('pm')
+    if (added.length > 0) {
+      const getSortWeight = (name) => {
+        const low = name.toLowerCase()
+        if (low.includes('am')) return 1
+        if (low.includes('pm')) return 2
+        return 3
+      }
 
-    const hasExistingAM = [...existingOnThisDate, ...existingInHistory.map(h => ({ durationName: h.duration_type }))]
-      .some(d => d.durationName.toLowerCase().includes('am'))
-    const hasExistingPM = [...existingOnThisDate, ...existingInHistory.map(h => ({ durationName: h.duration_type }))]
-      .some(d => d.durationName.toLowerCase().includes('pm'))
-
-    if (isNewAM && hasExistingAM) {
-      alert("You have already added a Half Day (AM) for this date.")
-      return
+      const updatedList = [...addedDates, ...added].sort((a, b) => {
+        if (a.date !== b.date) return a.date.localeCompare(b.date)
+        return getSortWeight(a.durationName) - getSortWeight(b.durationName)
+      })
+      setAddedDates(updatedList)
     }
-    if (isNewPM && hasExistingPM) {
-      alert("You have already added a Half Day (PM) for this date.")
-      return
-    }
-
-    // Use date-fns to get the day name safely without timezone shifts
-    const dayName = tempDate ? format(parseISO(tempDate), "EEEE") : ''
-
-    const getSortWeight = (name) => {
-      const low = name.toLowerCase()
-      if (low.includes('am')) return 1
-      if (low.includes('pm')) return 2
-      return 3 // Full Day
-    }
-
-    const newEntry = {
-      date: tempDate,
-      day: dayName,
-      durationName: newDurationObj.duration_name,
-      durationValue: newDurationObj.duration_value
-    }
-
-    const updatedList = [...addedDates, newEntry].sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date)
-      return getSortWeight(a.durationName) - getSortWeight(b.durationName)
-    })
-
-    setAddedDates(updatedList)
-    setTempDate('')
   }
 
   const removeDateFromList = (dateStr, durationName) => {
@@ -294,34 +324,53 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
               </div>
 
               <div style={{ backgroundColor: '#f9fafb', padding: '20px', borderRadius: '8px', border: '1px dashed #d1d5db' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '15px', alignItems: 'end' }}>
+                {/* Date Range */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '15px', alignItems: 'end' }}>
                   <div>
-                    <label style={labelStyle}>Date</label>
+                    <label style={labelStyle}>From Date</label>
                     <Flatpickr
-                      value={tempDate}
+                      value={tempRangeStart}
                       onChange={([date]) => {
-                        // Use date-fns to format local date correctly without timezone shifts
                         const formatted = date ? format(date, "yyyy-MM-dd") : ''
-                        setTempDate(formatted)
+                        setTempRangeStart(formatted)
                       }}
                       options={{
-                      dateFormat: "Y-m-d",
-                      disable: [
-                        (date) => date.getDay() === 0, // Disable Sundays (0)
-                        ...publicHolidays // Disable specific dates from the holiday list
-                      ]
+                        dateFormat: "Y-m-d",
+                        disable: [
+                          (date) => isWeekend(date),
+                          ...publicHolidays
+                        ]
                       }}
                       style={inputStyle}
-                      placeholder="Select Date"
+                      placeholder="From"
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>To Date</label>
+                    <Flatpickr
+                      value={tempRangeEnd}
+                      onChange={([date]) => {
+                        const formatted = date ? format(date, "yyyy-MM-dd") : ''
+                        setTempRangeEnd(formatted)
+                      }}
+                      options={{
+                        dateFormat: "Y-m-d",
+                        disable: [
+                          (date) => isWeekend(date),
+                          ...publicHolidays
+                        ]
+                      }}
+                      style={inputStyle}
+                      placeholder="To"
                     />
                   </div>
                   <div>
                     <label style={labelStyle}>Duration</label>
-                    <select value={tempDurationId} onChange={(e) => setTempDurationId(e.target.value)} style={inputStyle}>
+                    <select value={rangeDurationId} onChange={(e) => setRangeDurationId(e.target.value)} style={inputStyle}>
                       {durations.map(d => <option key={d.id} value={d.id}>{d.duration_name}</option>)}
                     </select>
                   </div>
-                  <button type="button" onClick={addDateToList} style={{ padding: '10px 20px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>➕ Add</button>
+                  <button type="button" onClick={addDateRangeToList} style={{ padding: '10px 20px', backgroundColor: '#059669', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="white" strokeWidth="2.5" strokeLinecap="round"/></svg> Add</button>
                 </div>
               </div>
 
@@ -356,7 +405,7 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                <button type="submit" disabled={addedDates.length === 0} style={{ padding: '10px 24px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Proceed to Confirmation</button>
+                <button type="submit" disabled={addedDates.length === 0} style={{ padding: '10px 24px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Confirm →</button>
               </div>
             </form>
           </>

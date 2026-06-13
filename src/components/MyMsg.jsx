@@ -62,13 +62,15 @@ export default function MyMsg({ supabase, profile, onMarkRead, setActiveMenu }) 
         page: 'approval', 
         data: { applicantId: n.related_user_id, createdAt: n.related_created_at } 
       });
-    } else if (n.type === 'approval' || n.type === 'manual_change') {
-      // If HR, navigate to staff leave management. If regular staff, navigate to their own history.
-      if (profile?.is_hr) {
-        setActiveMenu({ page: 'manage_personal_leave', data: { staffId: n.related_user_id } });
-      } else {
-        setActiveMenu('history'); // History page doesn't need specific staffId as it's always the current user
-      }
+    } else if (n.type === 'manual_change') {
+      // HR actions on leave records always redirect the affected user to their own history
+      setActiveMenu('history');
+    } else if (n.type === 'approval') {
+      // 'Leave Application Processed' — always redirect the applicant to their own history
+      setActiveMenu('history');
+    } else if (n.type === 'hr_review') {
+      // 'HR Action Required' — redirect HR to manage the specific staff's leave
+      setActiveMenu({ page: 'manage_personal_leave', data: { staffId: n.related_user_id } });
     }
   }
 

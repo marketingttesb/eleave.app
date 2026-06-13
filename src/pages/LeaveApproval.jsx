@@ -7,6 +7,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
   const [editingItems, setEditingItems] = useState([])
   const [rejectReason, setRejectReason] = useState('')
   const [deptApplications, setDeptApplications] = useState([])
+  const [applicantEligibility, setApplicantEligibility] = useState(null)
 
   const cardStyle = { 
     backgroundColor: 'white', padding: '30px', borderRadius: '12px', 
@@ -37,30 +38,21 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
 
   const selectedBatch = batches.find(b => b.key === selectedBatchKey)
 
-  // Fungsi untuk mengira jumlah AL yang dipilih dalam editingItems
-  const calculateTotalAL = (items) => {
-    return items
-      .filter(i => i.leave_type === 'Annual Leave' && i.status !== 'Rejected')
-      .reduce((sum, i) => sum + (parseFloat(i.duration_value) || 0), 0)
-  }
-
   // Keep editingItems in sync with selection
   useEffect(() => {
     if (selectedBatch) {
-      const currentYear = new Date().getFullYear()
-      const balance = selectedBatch.applicant?.leave_eligibility?.find(e => e.year === currentYear)?.balance ?? 0
-
       const initialItems = selectedBatch.items.map(item => ({
         ...item, 
-        status: 'Pending',
-        leave_type: '' // Set to empty to force superior selection
+        status: 'Pending'
       }))
       setEditingItems(initialItems)
       fetchDeptApplications(selectedBatch)
+      fetchApplicantEligibility(selectedBatch.applicant.id, new Date().getFullYear())
     } else {
       setEditingItems([])
       setRejectReason('')
       setDeptApplications([])
+      setApplicantEligibility(null)
     }
   }, [selectedBatchKey, batches, initialApplicantId, initialCreatedAt]) // Add initial props to dependencies
 
@@ -89,8 +81,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
           id,
           full_name,
           position,
-          department_id,
-          leave_eligibility!uid (*)
+          department_id
         )
       `)
       .eq('approver_id', profile.id)
@@ -162,6 +153,18 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
     setDeptApplications(processed)
   }
 
+  const fetchApplicantEligibility = async (staffId, year) => {
+    if (!staffId) return
+    const { data, error } = await supabase
+      .from('leave_eligibility')
+      .select('*')
+      .eq('uid', staffId)
+      .eq('year', year)
+      .maybeSingle()
+
+    if (!error) setApplicantEligibility(data || null)
+  }
+
   const formatDateDisplay = (dateStr) => {
     if (!dateStr) return ''
     return dateStr.substring(0, 10)
@@ -170,15 +173,6 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
   const handleProcessApplication = async () => {
     const applicant = selectedBatch.applicant
     const applicantName = applicant.full_name
-    const currentYear = new Date().getFullYear()
-    const applicantElig = (applicant.leave_eligibility || []).find(e => e.year === currentYear)
-    
-    // Semak jika cuti tahunan diluluskan tetapi rekod kelayakan tidak wujud
-    const containsAnnualLeaveApproval = editingItems.some(i => i.status === 'Approved' && i.leave_type === 'Annual Leave')
-    if (containsAnnualLeaveApproval && !applicantElig) {
-      alert(`Error: Tidak dapat meluluskan Cuti Tahunan. Rekod kelayakan cuti untuk ${applicantName} bagi tahun ${currentYear} tidak ditemui.`)
-      return
-    }
 
     const confirmCheck = window.confirm(`Are you sure you want to process the leave application for ${applicantName}?`)
     if (!confirmCheck) return
@@ -187,20 +181,21 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
     let hasError = false
 
     try {
-      // 1. Proses setiap item permohonan secara jujukan untuk kebolehpercayaan dan verifikasi
       for (const item of editingItems) {
+        const isApproved = item.status === 'Approved'
+        const isRejected = item.status === 'Rejected'
+
         const payload = { 
-          status: item.status, 
-          leave_type: item.leave_type, 
+          status: item.status,
           processed_by: profile.id, 
           processed_at: new Date().toISOString(),
-          // Lampirkan sebab penolakan jika berkaitan
-          reason: item.status === 'Rejected' && rejectReason 
+          needs_hr_review: isApproved,
+          leave_type: isRejected ? 'Rejected' : item.leave_type,
+          reason: isRejected && rejectReason 
             ? `${item.reason || ''}\n\n[HOD Reject Reason: ${rejectReason}]` 
             : item.reason
         }
 
-        // Gunakan count: 'exact' untuk sahkan baris dikemaskini tanpa bergantung pada pemulangan data
         const { error: updateError, count } = await supabase
           .from('leave_applications')
           .update(payload, { count: 'exact' })
@@ -212,8 +207,6 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
           break
         }
         
-        // Jika count adalah 0, bermakna polisi RLS UPDATE menghalang perubahan 
-        // atau ID tidak ditemui
         if (count === 0) {
           console.error(`Update gagal: 0 baris dikemaskini untuk ID ${item.id}.`);
           alert(`Gagal mengemaskini permohonan ID ${item.id}. Sila pastikan anda mempunyai akses 'UPDATE' di polisi RLS Supabase untuk table leave_applications.`);
@@ -222,49 +215,34 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
         }
       }
 
-      // 2. Jika semua permohonan berjaya diproses, kemaskini baki cuti jika perlu
-      if (!hasError && containsAnnualLeaveApproval && applicantElig) {
-        const totalAnnual = editingItems
-          .filter(i => i.status === 'Approved' && i.leave_type === 'Annual Leave')
-          .reduce((sum, i) => sum + (parseFloat(i.duration_value) || 0), 0)
-        
-        if (totalAnnual > 0) {
-          const newBalance = applicantElig.balance - totalAnnual
-          const { error: eligError } = await supabase
-            .from('leave_eligibility')
-            .update({ balance: newBalance })
-            .eq('id', applicantElig.id)
-            
-          if (eligError) {
-            console.error("Gagal mengemaskini baki cuti:", eligError.message)
-            alert(`Permohonan diproses, tetapi baki cuti gagal dikemaskini: ${eligError.message}`)
-          }
-        }
-      }
-
       if (!hasError) {
-        // 1. Notify the Applicant
-        await supabase.from('notifications').insert({
+        const hasApprovedItems = editingItems.some(i => i.status === 'Approved')
+
+        const { error: notifError } = await supabase.from('notifications').insert({
           user_id: applicant.id,
-          related_user_id: applicant.id, // The applicant's ID
-          related_created_at: selectedBatch.created_at, // The created_at of the leave application batch
+          related_user_id: applicant.id,
+          related_created_at: selectedBatch.created_at,
           title: 'Leave Application Processed',
           message: `Your leave request from ${new Date(selectedBatch.created_at).toLocaleDateString()} has been processed by ${profile.full_name}.`,
           type: 'approval'
         });
+        if (notifError) console.error('Notification insert failed (applicant):', notifError.message);
 
-        // 2. Notify HR Department
-        const { data: hrStaff } = await supabase.from('profiles').select('id').eq('is_hr', true);
-        if (hrStaff && hrStaff.length > 0) {
-          const hrNotifs = hrStaff.map(hr => ({
-            user_id: hr.id,
-            related_user_id: applicant.id, // The applicant's ID
-            related_created_at: selectedBatch.created_at, // The created_at of the leave application batch
-            title: 'Leave Status Update',
-            message: `${profile.full_name} (Superior) has processed leave for ${applicant.full_name}.`,
-            type: 'approval'
-          }));
-          await supabase.from('notifications').insert(hrNotifs);
+        if (hasApprovedItems) {
+          const { data: hrStaff, error: hrQueryError } = await supabase.from('profiles').select('id').eq('is_hr', true);
+          if (hrQueryError) console.error('HR query failed:', hrQueryError.message);
+          else if (hrStaff && hrStaff.length > 0) {
+            const hrNotifs = hrStaff.map(hr => ({
+              user_id: hr.id,
+              related_user_id: applicant.id,
+              related_created_at: selectedBatch.created_at,
+              title: 'HR Action Required',
+              message: `${applicant.full_name}'s leave has been approved by ${profile.full_name}. Please classify as Annual Leave or Unpaid Leave.`,
+              type: 'hr_review'
+            }));
+            const { error: hrNotifError } = await supabase.from('notifications').insert(hrNotifs);
+            if (hrNotifError) console.error('Notification insert failed (HR):', hrNotifError.message);
+          }
         }
 
         alert('Application processed successfully!')
@@ -283,7 +261,7 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
   }
 
   const hasRejectedItems = editingItems.some(item => item.status === 'Rejected');
-  const allItemsAssigned = editingItems.every(item => item.leave_type !== '' || item.status === 'Rejected');
+  const allItemsAssigned = editingItems.every(item => item.status === 'Approved' || item.status === 'Rejected');
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr 1fr', gap: '20px', width: '100%', height: 'calc(100vh - 150px)' }}>
@@ -346,59 +324,57 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
             <p>Select a request from the left to view details</p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div style={{ borderBottom: '2px solid #f3f4f6', paddingBottom: '15px' }}>
-              <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '20px' }}>📄 Request Details</h3>
-              <p style={{ margin: '5px 0 0 0', color: '#6b7280', fontSize: '13px' }}>Submitted on {new Date(selectedBatch.created_at).toLocaleString()}</p>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '20px', alignItems: 'flex-start' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #f3f4f6', paddingBottom: '15px' }}>
               <div>
-                <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Applicant</label>
-                <div style={{ fontWeight: '600', color: '#111827' }}>{selectedBatch.applicant?.full_name}</div>
-                <div style={{ fontSize: '13px', color: '#6b7280' }}>{selectedBatch.applicant?.position}</div>
+                <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '20px' }}>📄 Request Details</h3>
+                <p style={{ margin: '5px 0 0 0', color: '#6b7280', fontSize: '13px' }}>Submitted on {new Date(selectedBatch.created_at).toLocaleString()}</p>
               </div>
-              
               {/* Leave statistics cards for applicant context */}
-              {(() => {
-                const currentYear = new Date().getFullYear();
-                const applicantElig = selectedBatch.applicant?.leave_eligibility?.find(e => e.year === currentYear);
-                const usedAL = (applicantElig?.eligibility ?? 0) - (applicantElig?.balance ?? 0);
-                const usedMC = (applicantElig?.mc_eligibility ?? 0) - (applicantElig?.mc_balance ?? 0);
-
-                return (
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    {/* AL Card */}
-                    <div style={{ padding: '8px 12px', backgroundColor: '#f5f3ff', borderRadius: '8px', border: '1px solid #ddd6fe', minWidth: '140px' }}>
-                      <div style={{ fontSize: '9px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', textAlign: 'center' }}>📅 Annual Leave</div>
-                      <div style={{ display: 'flex', marginTop: '4px' }}>
-                        <div style={{ flex: 1, textAlign: 'center' }}>
-                          <div style={{ fontSize: '8px', color: '#6b7280' }}>Used</div>
-                          <div style={{ fontSize: '13px', fontWeight: '800', color: '#10b981' }}>{usedAL}d</div>
-                        </div>
-                        <div style={{ borderLeft: '1px solid #ddd6fe', paddingLeft: '10px', flex: 1, textAlign: 'center' }}>
-                          <div style={{ fontSize: '8px', color: '#6b7280' }}>Bal.</div>
-                          <div style={{ fontSize: '13px', fontWeight: '800', color: '#4f46e5' }}>{applicantElig?.balance ?? 0}d</div>
-                        </div>
-                      </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {/* AL Card */}
+                <div style={{ padding: '8px 14px', backgroundColor: '#f5f3ff', borderRadius: '8px', border: '1px solid #ddd6fe' }}>
+                  <div style={{ fontSize: '9px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', textAlign: 'center', marginBottom: '2px' }}>📅 Annual Leave</div>
+                  <div style={{ display: 'flex', marginTop: '2px', gap: '10px' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '8px', color: '#6b7280' }}>Elig</div>
+                      <div style={{ fontSize: '12px', fontWeight: '800', color: '#7c3aed' }}>{applicantEligibility?.eligibility ?? 0}d</div>
                     </div>
-                    {/* MC Card */}
-                    <div style={{ padding: '8px 12px', backgroundColor: '#eff6ff', borderRadius: '8px', border: '1px solid #bfdbfe', minWidth: '140px' }}>
-                      <div style={{ fontSize: '9px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', textAlign: 'center' }}>🤢 Sick Leave (MC)</div>
-                      <div style={{ display: 'flex', marginTop: '4px' }}>
-                        <div style={{ flex: 1, textAlign: 'center' }}>
-                          <div style={{ fontSize: '8px', color: '#6b7280' }}>Used</div>
-                          <div style={{ fontSize: '13px', fontWeight: '800', color: '#10b981' }}>{usedMC}d</div>
-                        </div>
-                        <div style={{ borderLeft: '1px solid #bfdbfe', paddingLeft: '10px', flex: 1, textAlign: 'center' }}>
-                          <div style={{ fontSize: '8px', color: '#6b7280' }}>Bal.</div>
-                          <div style={{ fontSize: '13px', fontWeight: '800', color: '#2563eb' }}>{applicantElig?.mc_balance ?? 0}d</div>
-                        </div>
-                      </div>
+                    <div style={{ borderLeft: '1px solid #ddd6fe', paddingLeft: '10px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '8px', color: '#6b7280' }}>Used</div>
+                      <div style={{ fontSize: '12px', fontWeight: '800', color: '#10b981' }}>{((applicantEligibility?.eligibility ?? 0) - (applicantEligibility?.balance ?? 0))}d</div>
+                    </div>
+                    <div style={{ borderLeft: '1px solid #ddd6fe', paddingLeft: '10px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '8px', color: '#6b7280' }}>Bal.</div>
+                      <div style={{ fontSize: '12px', fontWeight: '800', color: '#4f46e5' }}>{applicantEligibility?.balance ?? 0}d</div>
                     </div>
                   </div>
-                );
-              })()}
+                </div>
+                {/* MC Card */}
+                <div style={{ padding: '8px 14px', backgroundColor: '#eff6ff', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                  <div style={{ fontSize: '9px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', textAlign: 'center', marginBottom: '2px' }}>🤢 Sick Leave (MC)</div>
+                  <div style={{ display: 'flex', marginTop: '2px', gap: '10px' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '8px', color: '#6b7280' }}>Elig</div>
+                      <div style={{ fontSize: '12px', fontWeight: '800', color: '#1d4ed8' }}>{applicantEligibility?.mc_eligibility ?? 0}d</div>
+                    </div>
+                    <div style={{ borderLeft: '1px solid #bfdbfe', paddingLeft: '10px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '8px', color: '#6b7280' }}>Used</div>
+                      <div style={{ fontSize: '12px', fontWeight: '800', color: '#10b981' }}>{((applicantEligibility?.mc_eligibility ?? 0) - (applicantEligibility?.mc_balance ?? 0))}d</div>
+                    </div>
+                    <div style={{ borderLeft: '1px solid #bfdbfe', paddingLeft: '10px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '8px', color: '#6b7280' }}>Bal.</div>
+                      <div style={{ fontSize: '12px', fontWeight: '800', color: '#2563eb' }}>{applicantEligibility?.mc_balance ?? 0}d</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Applicant</label>
+              <div style={{ fontWeight: '600', color: '#111827' }}>{selectedBatch.applicant?.full_name}</div>
+              <div style={{ fontSize: '13px', color: '#6b7280' }}>{selectedBatch.applicant?.position}</div>
             </div>
 
             <div>
@@ -410,85 +386,62 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
 
             <div>
               <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>
-                Assign Leave Type for Each Date
+                Approve or Reject Each Date
               </label>
               
-              {/* Logik pengiraan baki berpusat sebelum render senarai */}
-              {(() => {
-                const currentYear = new Date().getFullYear();
-                const balance = parseFloat(selectedBatch.applicant?.leave_eligibility?.find(e => e.year === currentYear)?.balance ?? 0);
-                const totalALUsed = Math.round(calculateTotalAL(editingItems) * 100) / 100;
-                const isALFull = totalALUsed >= balance;
-
-                return (
-                  <div style={{ marginTop: '10px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
-                    {editingItems.map((item, idx) => {
-                      const isALOptionDisabled = isALFull && item.leave_type !== 'Annual Leave';
-
-                      return (
-                    <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 15px', borderBottom: idx === selectedBatch.items.length - 1 ? 'none' : '1px solid #f3f4f6', backgroundColor: 'white' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>{formatDateDisplay(item.leave_date)}</span>
-                        <span style={{ fontSize: '12px', color: '#6b7280' }}>{item.duration_type} ({item.duration_value})</span>
-                      </div>
-                      <select 
-                        value={item.status === 'Rejected' ? 'Rejected' : item.leave_type} 
-                        onChange={(e) => {
-                          const val = e.target.value
+              <div style={{ marginTop: '10px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+                {editingItems.map((item, idx) => (
+                  <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 15px', borderBottom: idx === selectedBatch.items.length - 1 ? 'none' : '1px solid #f3f4f6', backgroundColor: 'white' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>{formatDateDisplay(item.leave_date)}</span>
+                      <span style={{ fontSize: '12px', color: '#6b7280' }}>{item.duration_type} ({item.duration_value})</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => {
                           const updated = [...editingItems]
-                          
-                          if (val === 'Rejected') {
-                            updated[idx].status = 'Rejected'
-                            updated[idx].leave_type = 'Rejected'
-                          } else if (val === 'Annual Leave') {
-                            // Simulasi jumlah baru sebelum update state
-                            const tempItems = updated.map((it, i) => i === idx ? { ...it, leave_type: 'Annual Leave' } : it)
-                            const newTotal = Math.round(calculateTotalAL(tempItems) * 100) / 100;
-                            
-                            if (newTotal > balance) {
-                              alert(`❌ ACTION DENIED: Total Annual Leave selected (${newTotal} days) would exceed the staff's current balance of ${balance} days.`);
-                              return
-                            }
-
-                            if (newTotal === balance) {
-                              alert(`📢 INFO: Annual Leave for this staff has been fully utilized (${newTotal}/${balance} days). Any other dates must be assigned as Unpaid Leave or Rejected.`);
-                            }
-
-                            updated[idx].status = 'Approved'
-                            updated[idx].leave_type = 'Annual Leave'
-                          } else if (val === 'Unpaid Leave') {
-                            updated[idx].status = 'Approved'
-                            updated[idx].leave_type = 'Unpaid Leave'
-                          } else {
-                            updated[idx].status = 'Pending'
-                            updated[idx].leave_type = ''
-                          }
+                          updated[idx].status = 'Approved'
                           setEditingItems(updated)
                         }}
-                        style={{ 
-                          padding: '4px 8px', 
-                          borderRadius: '6px', 
-                          border: '1px solid #d1d5db', 
-                          fontSize: '13px', 
-                          backgroundColor: item.status === 'Rejected' ? '#fee2e2' : (item.leave_type === 'Unpaid Leave' ? '#fff7ed' : item.leave_type === 'Annual Leave' ? '#ecfdf5' : 'white'),
-                          color: item.status === 'Rejected' ? '#b91c1c' : '#111827',
-                          fontWeight: (item.status === 'Rejected' || item.leave_type !== '') ? '700' : '400'
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          backgroundColor: item.status === 'Approved' ? '#059669' : '#e5e7eb',
+                          color: item.status === 'Approved' ? 'white' : '#374151',
+                          transition: 'all 0.15s'
                         }}
                       >
-                        <option value="">-- Please Select --</option>
-                        <option value="Annual Leave" disabled={isALOptionDisabled}>
-                          Annual Leave {isALOptionDisabled ? '(Insufficient Balance)' : ''}
-                        </option>
-                        <option value="Unpaid Leave">Unpaid Leave</option>
-                        <option disabled>──────────</option>
-                        <option value="Rejected">Rejected</option>
-                      </select>
+                        ✅ Approve
+                      </button>
+                      <button
+                        onClick={() => {
+                          const updated = [...editingItems]
+                          updated[idx].status = 'Rejected'
+                          updated[idx].leave_type = 'Rejected'
+                          setEditingItems(updated)
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          backgroundColor: item.status === 'Rejected' ? '#dc2626' : '#e5e7eb',
+                          color: item.status === 'Rejected' ? 'white' : '#374151',
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        ❌ Reject
+                      </button>
                     </div>
-                      );
-                    })}
                   </div>
-                );
-              })()}
+                ))}
+              </div>
             </div>
 
             {hasRejectedItems && (
@@ -504,7 +457,12 @@ export default function LeaveApproval({ supabase, profile, onActionSuccess, init
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', padding: '15px', backgroundColor: '#f5f3ff', borderRadius: '12px' }}>
-              <div style={{ fontSize: '14px', fontWeight: '600' }}>Total reviewing: {editingItems.reduce((sum, i) => sum + parseFloat(i.duration_value), 0)} Days</div>
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: '600' }}>Total: {editingItems.reduce((sum, i) => sum + parseFloat(i.duration_value), 0)} Days</div>
+                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                  {editingItems.filter(i => i.status === 'Approved').length} Approved, {editingItems.filter(i => i.status === 'Rejected').length} Rejected
+                </div>
+              </div>
               <button 
                 onClick={handleProcessApplication} 
                 disabled={loading || !allItemsAssigned || (hasRejectedItems && !rejectReason.trim())} 

@@ -1,0 +1,1 @@
+ALTER TABLE leave_applications ADD COLUMN IF NOT EXISTS needs_hr_review BOOLEAN DEFAULT FALSE;
