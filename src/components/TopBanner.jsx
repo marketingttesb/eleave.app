@@ -1,4 +1,5 @@
 import React from 'react'
+import { toTitleCase } from '../lib/format'
 
 export default function TopBanner({ profile, activeMenu, onLogout }) {
   const getPageTitle = () => {
@@ -47,7 +48,7 @@ export default function TopBanner({ profile, activeMenu, onLogout }) {
       {/* User Block */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>{profile?.full_name}</div>
+          <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>{toTitleCase(profile?.full_name)}</div>
           <div style={{ fontSize: '12px', color: '#6b7280' }}>{profile?.position || 'Employee'}</div>
         </div>
         <button onClick={onLogout} style={{ padding: '8px 14px', backgroundColor: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' }}>

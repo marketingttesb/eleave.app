@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { format, parseISO, isPast } from 'date-fns'
+import { toTitleCase } from '../lib/format'
 
 export default function Dashboard({ supabase, profile }) {
   const [approvedDays, setApprovedDays] = useState(0)
@@ -90,7 +91,7 @@ export default function Dashboard({ supabase, profile }) {
       <div style={{ marginBottom: '32px' }}>
         <h2 style={{ margin: 0, color: '#111827', fontSize: '24px', fontWeight: '800' }}>Dashboard Overview</h2>
         <p style={{ color: '#6b7280', marginTop: '4px', fontSize: '15px' }}>
-          Hello, <strong>{profile.full_name}</strong>. Here is your leave summary for {new Date().getFullYear()}.
+           Hello, <strong>{toTitleCase(profile.full_name)}</strong>. Here is your leave summary for {new Date().getFullYear()}.
         </p>
       </div>
 

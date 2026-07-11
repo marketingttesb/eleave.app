@@ -1,54 +1,28 @@
 import React, { useState, useEffect } from 'react'
-import Flatpickr from "react-flatpickr"
-import "flatpickr/dist/themes/light.css" // You can choose different themes
 import { format, parseISO, addDays } from "date-fns"
+import { toTitleCase } from "../lib/format"
+import { cardStyle, labelStyle, pageTitleStyle } from '../lib/styles'
+import DateRangeInput from '../components/DateRangeInput'
+import SelectedDatesTable from '../components/SelectedDatesTable'
+import ConfirmationScreen from '../components/ConfirmationScreen'
+import LeaveHistorySidebar from '../components/LeaveHistorySidebar'
 
 export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) {
   const [leaveTypes, setLeaveTypes] = useState([])
   const [durations, setDurations] = useState([])
   const [loading, setLoading] = useState(false)
-  const [leaveHistory, setLeaveHistory] = useState([]) // Sejarah cuti staf
-  const [showConfirmation, setShowConfirmation] = useState(false) // Mod pengesahan
-  const [publicHolidays, setPublicHolidays] = useState([]) // Senarai tarikh cuti umum
+  const [leaveHistory, setLeaveHistory] = useState([])
+  const [showConfirmation, setShowConfirmation] = useState(false)
+  const [publicHolidays, setPublicHolidays] = useState([])
 
-  // Main Form States
-  const [leaveType, setLeaveType] = useState('Annual Leave')
+  const [leaveType, setLeaveType] = useState('Normal Leave')
   const [reason, setReason] = useState('')
-  const [addedDates, setAddedDates] = useState([]) // Simpan senarai tarikh yang dipilih
+  const [addedDates, setAddedDates] = useState([])
 
-  // Range Input States
   const [tempRangeStart, setTempRangeStart] = useState('')
   const [tempRangeEnd, setTempRangeEnd] = useState('')
   const [rangeDurationId, setRangeDurationId] = useState('')
   const [userDepartmentName, setUserDepartmentName] = useState('')
-
-  const cardStyle = { 
-    backgroundColor: 'white', 
-    padding: '30px', 
-    borderRadius: '12px', 
-    border: '1px solid #e5e7eb', 
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    width: '100%',
-    boxSizing: 'border-box'
-  }
-
-  const inputStyle = {
-    padding: '10px 14px',
-    borderRadius: '8px',
-    border: '1px solid #d1d5db',
-    fontSize: '14px',
-    width: '100%',
-    boxSizing: 'border-box',
-    backgroundColor: 'white'
-  }
-
-  const labelStyle = {
-    fontSize: '14px',
-    fontWeight: '600',
-    color: '#374151',
-    display: 'block',
-    marginBottom: '8px'
-  }
 
   useEffect(() => {
     fetchMetadata()
@@ -59,16 +33,13 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
   }, [profile])
 
   const fetchMetadata = async () => {
-    const { data: types } = await supabase.from('leave_types').select('*').order('type_name', { ascending: true })
     const { data: durs } = await supabase.from('leave_durations').select('*').order('duration_value', { descending: true })
     const { data: holidays } = await supabase.from('public_holidays').select('holiday_date')
 
-    if (types) {
-      setLeaveTypes(types)
-      const annual = types.find(t => t.type_name.toLowerCase().includes('annual'))
-      if (annual) setLeaveType(annual.type_name)
-      else if (types.length > 0) setLeaveType(types[0].type_name)
-    }
+    setLeaveTypes([
+      { id: 'normal', type_name: 'Normal Leave' },
+      { id: 'sick', type_name: 'Sick Leave - MC' },
+    ])
     if (durs) {
       setDurations(durs)
       if (durs.length > 0) {
@@ -92,16 +63,15 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
       .from('leave_applications')
       .select('*')
       .eq('staff_id', profile.id)
-      .order('leave_date', { ascending: false }) // Susun tarikh terbaru di atas
+      .order('leave_date', { ascending: false })
       .order('created_at', { ascending: false })
-    
+
     if (!error) setLeaveHistory(data)
   }
 
-  // Helper to ensure dates are displayed as YYYY-MM-DD consistently
   const formatDateDisplay = (dateStr) => {
     if (!dateStr) return ''
-    return dateStr.substring(0, 10) // Extracts YYYY-MM-DD from ISO strings or date strings
+    return dateStr.substring(0, 10)
   }
 
   const isWeekend = (date) => {
@@ -140,16 +110,20 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
     const added = []
     const skipped = []
 
+    const isSickLeave = leaveType === 'Sick Leave - MC'
+
     for (const dateStr of allDates) {
       const dateObj = parseISO(dateStr)
 
-      if (isWeekend(dateObj)) {
-        skipped.push({ date: dateStr, reason: 'Weekend' })
-        continue
-      }
-      if (publicHolidays.includes(dateStr)) {
-        skipped.push({ date: dateStr, reason: 'Public Holiday' })
-        continue
+      if (!isSickLeave) {
+        if (isWeekend(dateObj)) {
+          skipped.push({ date: dateStr, reason: 'Weekend' })
+          continue
+        }
+        if (publicHolidays.includes(dateStr)) {
+          skipped.push({ date: dateStr, reason: 'Public Holiday' })
+          continue
+        }
       }
 
       const existingOnThisDate = addedDates.filter(d => d.date === dateStr)
@@ -241,11 +215,10 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
     if (error) {
       alert(`Error submitting application: ${error.message}`)
     } else {
-      // Notify the superior
       await supabase.from('notifications').insert({
         user_id: profile.report_to,
         title: 'New Leave Request',
-        message: `${profile.full_name} has submitted a request for ${addedDates.length} day(s).`,
+        message: `${toTitleCase(profile.full_name)} has submitted a request for ${addedDates.length} day(s).`,
         type: 'application'
       });
 
@@ -280,316 +253,133 @@ export default function ApplyLeave({ supabase, profile, onApplicationSuccess }) 
     setLoading(false)
   }
 
-  // Kirakan jumlah cuti tahunan yang telah diluluskan untuk tahun semasa
   const currentYear = new Date().getFullYear()
   const approvedAnnualDays = leaveHistory
     .filter(h => h.status === 'Approved' && h.leave_type === 'Annual Leave' && h.leave_date.startsWith(String(currentYear)))
     .reduce((sum, h) => sum + parseFloat(h.duration_value), 0)
 
-  // Kirakan jumlah cuti sakit (MC) yang telah diluluskan untuk tahun semasa
   const approvedMcDays = leaveHistory
     .filter(h => h.status === 'Approved' && h.leave_type === 'Sick Leave - MC' && h.leave_date.startsWith(String(currentYear)))
     .reduce((sum, h) => sum + parseFloat(h.duration_value), 0)
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '30px', width: '100%' }}>
-      
-      {/* KIRI: BORANG PERMOHONAN / CONFIRMATION */}
+
       <div style={cardStyle}>
         {!showConfirmation ? (
           <>
             <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '20px' }}>📝 Leave Application Form</h3>
-              <p style={{ color: '#6b7280', fontSize: '14px', margin: '5px 0 0 0' }}>Fill in the details to request leave.</p>
+              <h3 style={pageTitleStyle}>📝 Leave Application Form</h3>
+              <p style={{ color: '#6b7280', fontSize: '14px', margin: '5px 0 0 0' }}>
+                Fill in the details to request leave.
+              </p>
             </div>
 
             <form onSubmit={handleProceedToConfirm} style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
+              <div>
+                <label style={labelStyle}>Leave Type</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {leaveTypes.map(t => {
+                    const isActive = leaveType === t.type_name
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setLeaveType(t.type_name)}
+                        style={{
+                          flex: 1, padding: '10px 16px', borderRadius: '8px', border: '2px solid',
+                          borderColor: isActive ? '#4f46e5' : '#d1d5db',
+                          backgroundColor: isActive ? '#f5f3ff' : 'white',
+                          color: isActive ? '#4f46e5' : '#374151',
+                          fontWeight: isActive ? '700' : '500',
+                          fontSize: '14px', cursor: 'pointer', transition: 'all 0.15s'
+                        }}
+                      >
+                        {t.type_name === 'Sick Leave - MC' ? '🤒 Sick Leave' : '📅 ' + t.type_name}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
                 <div>
                   <label style={labelStyle}>Reason</label>
-                  <textarea 
-                    value={reason} 
+                  <textarea
+                    value={reason}
                     onChange={(e) => setReason(e.target.value)}
                     placeholder="Enter reason..."
-                    style={{ ...inputStyle, minHeight: '44px' }}
+                    style={{
+                      padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db',
+                      fontSize: '14px', width: '100%', boxSizing: 'border-box',
+                      backgroundColor: 'white', minHeight: '44px'
+                    }}
                     required
                   />
                 </div>
                 <div>
                   <label style={labelStyle}>Approved By</label>
                   <div style={{ padding: '10px 0', fontSize: '15px', color: '#111827', fontWeight: '600' }}>
-                    {profile?.superior?.full_name || 'Not Assigned'}
+                    {toTitleCase(profile?.superior?.full_name) || 'Not Assigned'}
                   </div>
                 </div>
               </div>
 
-              <div style={{ backgroundColor: '#f9fafb', padding: '20px', borderRadius: '8px', border: '1px dashed #d1d5db' }}>
-                {/* Date Range */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '15px', alignItems: 'end' }}>
-                  <div>
-                    <label style={labelStyle}>From Date</label>
-                    <Flatpickr
-                      value={tempRangeStart}
-                      onChange={([date]) => {
-                        const formatted = date ? format(date, "yyyy-MM-dd") : ''
-                        setTempRangeStart(formatted)
-                      }}
-                      options={{
-                        dateFormat: "Y-m-d",
-                        disable: [
-                          (date) => isWeekend(date),
-                          ...publicHolidays
-                        ]
-                      }}
-                      style={inputStyle}
-                      placeholder="From"
-                    />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>To Date</label>
-                    <Flatpickr
-                      value={tempRangeEnd}
-                      onChange={([date]) => {
-                        const formatted = date ? format(date, "yyyy-MM-dd") : ''
-                        setTempRangeEnd(formatted)
-                      }}
-                      options={{
-                        dateFormat: "Y-m-d",
-                        disable: [
-                          (date) => isWeekend(date),
-                          ...publicHolidays
-                        ]
-                      }}
-                      style={inputStyle}
-                      placeholder="To"
-                    />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Duration</label>
-                    <select value={rangeDurationId} onChange={(e) => setRangeDurationId(e.target.value)} style={inputStyle}>
-                      {durations.map(d => <option key={d.id} value={d.id}>{d.duration_name}</option>)}
-                    </select>
-                  </div>
-                  <button type="button" onClick={addDateRangeToList} style={{ padding: '10px 20px', backgroundColor: '#059669', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke="white" strokeWidth="2.5" strokeLinecap="round"/></svg> Add</button>
-                </div>
-              </div>
+              <DateRangeInput
+                tempRangeStart={tempRangeStart}
+                tempRangeEnd={tempRangeEnd}
+                rangeDurationId={rangeDurationId}
+                durations={durations}
+                isWeekend={isWeekend}
+                publicHolidays={publicHolidays}
+                onStartChange={setTempRangeStart}
+                onEndChange={setTempRangeEnd}
+                onDurationChange={setRangeDurationId}
+                onAdd={addDateRangeToList}
+              />
 
-              <div>
-                <label style={labelStyle}>Selected Dates</label>
-                <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                    <thead style={{ backgroundColor: '#f3f4f6' }}>
-                      <tr>
-                        <th style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '600' }}>Date</th>
-                        <th style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '600' }}>Duration</th>
-                        <th style={{ padding: '12px 16px', textAlign: 'center', width: '80px' }}>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {addedDates.length === 0 ? (
-                        <tr><td colSpan="3" style={{ padding: '20px', textAlign: 'center', color: '#9ca3af' }}>No dates selected.</td></tr>
-                      ) : (
-                        addedDates.map((item, idx) => (
-                          <tr key={`${item.date}-${item.durationName}`} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                            <td style={{ padding: '12px 16px', fontSize: '14px' }}>{formatDateDisplay(item.date)} ({item.day})</td>
-                            <td style={{ padding: '12px 16px', fontSize: '14px' }}>{item.durationName}</td>
-                            <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                              <button type="button" onClick={() => removeDateFromList(item.date, item.durationName)} style={{ padding: '4px 8px', backgroundColor: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>🗑️</button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <SelectedDatesTable
+                addedDates={addedDates}
+                onRemoveDate={removeDateFromList}
+                formatDateDisplay={formatDateDisplay}
+              />
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                <button type="submit" disabled={addedDates.length === 0} style={{ padding: '10px 24px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Confirm →</button>
+                <button
+                  type="submit"
+                  disabled={addedDates.length === 0}
+                  style={{
+                    padding: '10px 24px', backgroundColor: '#4f46e5', color: 'white',
+                    border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer'
+                  }}
+                >
+                  Confirm →
+                </button>
               </div>
             </form>
           </>
         ) : (
-          <div>
-            <div style={{ marginBottom: '25px' }}>
-              <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '20px' }}>⚠️ Confirm Leave Application</h3>
-              <p style={{ color: '#6b7280', fontSize: '14px', margin: '5px 0 0 0' }}>Please review your leave request details before final submission.</p>
-            </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', backgroundColor: '#f9fafb', padding: '25px', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '25px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                <div>
-                  <label style={labelStyle}>Approver</label>
-                  <div style={{ fontSize: '15px', color: '#111827', fontWeight: '500' }}>{profile?.superior?.full_name || 'Not Assigned'}</div>
-                </div>
-                <div>
-                  <label style={labelStyle}>Total Duration</label>
-                  <div style={{ fontSize: '18px', color: '#4f46e5', fontWeight: '800' }}>
-                    {addedDates.reduce((sum, i) => sum + i.durationValue, 0)} <span style={{ fontSize: '14px', fontWeight: '500', color: '#6b7280' }}>Days</span>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '15px' }}>
-                <label style={labelStyle}>Reason</label>
-                <div style={{ fontSize: '15px', color: '#111827', fontWeight: '500' }}>{reason}</div>
-              </div>
-
-              <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '15px' }}>
-                <label style={labelStyle}>Date Breakdown</label>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <th style={{ padding: '8px 0', fontSize: '12px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Date</th>
-                        <th style={{ padding: '8px 0', fontSize: '12px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Day</th>
-                        <th style={{ padding: '8px 0', fontSize: '12px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Duration</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {addedDates.map((d, i) => (
-                        <tr key={i} style={{ borderBottom: i === addedDates.length - 1 ? 'none' : '1px solid #f3f4f6' }}>
-                          <td style={{ padding: '10px 0', fontSize: '14px', color: '#111827', fontWeight: '500' }}>{formatDateDisplay(d.date)}</td>
-                          <td style={{ padding: '10px 0', fontSize: '14px', color: '#4b5563' }}>{d.day}</td>
-                          <td style={{ padding: '10px 0', fontSize: '14px', color: '#4b5563' }}>{d.durationName}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowConfirmation(false)} style={{ padding: '10px 20px', backgroundColor: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Cancel & Edit</button>
-              <button onClick={handleFinalConfirm} disabled={loading} style={{ padding: '10px 24px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>
-                {loading ? 'Submitting...' : 'Confirm & Submit'}
-              </button>
-            </div>
-          </div>
+          <ConfirmationScreen
+            profile={profile}
+            addedDates={addedDates}
+            reason={reason}
+            loading={loading}
+            formatDateDisplay={formatDateDisplay}
+            onConfirm={handleFinalConfirm}
+            onCancel={() => setShowConfirmation(false)}
+          />
         )}
       </div>
 
-      {/* KANAN: SEJARAH CUTI (HISTORY) */}
-      <div style={cardStyle}>
-        {/* Panel Ringkasan Cuti (Dashboard Info) */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '25px' }}>
-          {/* AL Combined Card */}
-          <div style={{ 
-            padding: '12px 18px', 
-            backgroundColor: '#f5f3ff', 
-            borderRadius: '10px', 
-            border: '1px solid #ddd6fe',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px'
-          }}>
-            <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center' }}>
-              📅 Annual Leave
-            </div>
-            <div style={{ display: 'flex', marginTop: '2px' }}>
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Elig.</div>
-                <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827' }}>
-                  {profile.current_eligibility?.eligibility ?? 0}d
-                </div>
-              </div>
-              <div style={{ borderLeft: '1px solid #ddd6fe', paddingLeft: '14px', flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Used</div>
-                <div style={{ fontSize: '15px', fontWeight: '800', color: '#10b981' }}>
-                  {approvedAnnualDays}d
-                </div>
-              </div>
-              <div style={{ borderLeft: '1px solid #ddd6fe', paddingLeft: '14px', flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Bal.</div>
-                <div style={{ fontSize: '15px', fontWeight: '800', color: '#4f46e5' }}>
-                  {profile.current_eligibility?.balance ?? 0}d
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* MC Combined Card */}
-          <div style={{ 
-            padding: '12px 18px', 
-            backgroundColor: '#eff6ff', 
-            borderRadius: '10px', 
-            border: '1px solid #bfdbfe',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px'
-          }}>
-            <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center' }}>
-              🤢 Sick Leave (MC)
-            </div>
-            <div style={{ display: 'flex', marginTop: '2px' }}>
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Elig.</div>
-                <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827' }}>
-                  {profile.current_eligibility?.mc_eligibility ?? 0}d
-                </div>
-              </div>
-              <div style={{ borderLeft: '1px solid #bfdbfe', paddingLeft: '14px', flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Used</div>
-                <div style={{ fontSize: '15px', fontWeight: '800', color: '#10b981' }}>
-                  {approvedMcDays}d
-                </div>
-              </div>
-              <div style={{ borderLeft: '1px solid #bfdbfe', paddingLeft: '14px', flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: '600' }}>Bal.</div>
-                <div style={{ fontSize: '15px', fontWeight: '800', color: '#2563eb' }}>
-                  {profile.current_eligibility?.mc_balance ?? 0}d
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Separator */}
-        <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb', margin: '0 -30px 25px -30px' }} />
-
-        <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ margin: 0, color: '#4f46e5', fontSize: '20px' }}>📜 Leave History</h3>
-          <p style={{ color: '#6b7280', fontSize: '14px', margin: '5px 0 0 0' }}>Track your applied dates.</p>
-        </div>
-        
-        <div style={{ maxHeight: '600px', overflowY: 'auto' }}>
-          {leaveHistory.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#9ca3af', padding: '20px' }}>No history found.</p>
-          ) : (
-            leaveHistory.map((h) => (
-              <div key={h.id} style={{ padding: '12px', borderBottom: '1px solid #f3f4f6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#374151' }}>{formatDateDisplay(h.leave_date)}</div>
-                  <div style={{ fontSize: '12px', color: '#6b7280' }}>{h.duration_type} ({h.duration_value})</div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {h.status === 'Pending' && (
-                    <button 
-                      onClick={() => handleDeleteHistory(h.id, h.status)}
-                      disabled={loading}
-                      style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', cursor: loading ? 'not-allowed' : 'pointer', padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      title="Delete Application"
-                    >
-                      🗑️
-                    </button>
-                  )}
-                  <span style={{ 
-                    fontSize: '11px', 
-                    padding: '3px 8px', 
-                    borderRadius: '12px', 
-                    fontWeight: '700',
-                    backgroundColor: h.status === 'Approved' ? '#ecfdf5' : h.status === 'Pending' ? '#eff6ff' : '#fef2f2',
-                    color: h.status === 'Approved' ? '#059669' : h.status === 'Pending' ? '#2563eb' : '#dc2626'
-                  }}>
-                    {h.status}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      <LeaveHistorySidebar
+        profile={profile}
+        approvedAnnualDays={approvedAnnualDays}
+        approvedMcDays={approvedMcDays}
+        leaveHistory={leaveHistory}
+        loading={loading}
+        formatDateDisplay={formatDateDisplay}
+        onDeleteHistory={handleDeleteHistory}
+      />
 
     </div>
   )
