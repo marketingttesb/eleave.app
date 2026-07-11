@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { cardStyle } from '../lib/styles'
 
 export default function ManageDepartments({ supabase }) {
   const [departments, setDepartments] = useState([])
@@ -8,17 +9,6 @@ export default function ManageDepartments({ supabase }) {
   // States untuk fungsi Edit secara Inline
   const [editingId, setEditingId] = useState(null)
   const [editingName, setEditingName] = useState('')
-
-  // Lebar penuh (Full Width) untuk konsistensi reka bentuk dengan Manage Staff
-  const cardStyle = { 
-    backgroundColor: 'white', 
-    padding: '30px', 
-    borderRadius: '12px', 
-    border: '1px solid #e5e7eb', 
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    width: '100%',
-    boxSizing: 'border-box'
-  }
 
   useEffect(() => {
     fetchDepartments()

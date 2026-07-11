@@ -27,6 +27,11 @@ src-tauri/target
 
 # Build secrets
 Build.txt
+build-update.txt
+
+# Signing keys
+src-tauri/myapp.key
+src-tauri/myapp.key.pub
 
 # Temp artifacts
 src-tauri/2

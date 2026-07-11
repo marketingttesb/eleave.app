@@ -5,7 +5,6 @@ npm run tauri build
 
 
 
-
 --
 
 # Tauri Update Release Guide (GitHub Auto Updater)
@@ -14,13 +13,13 @@ npm run tauri build
 
 ### package.json
 
-Cari:
+Find:
 
 ```json
 "version": "0.1.1"
 ```
 
-Tukar:
+Change to:
 
 ```json
 "version": "0.1.2"
@@ -30,19 +29,19 @@ Tukar:
 
 ### src-tauri/tauri.conf.json
 
-Cari:
+Find:
 
 ```json
 "version": "0.1.1"
 ```
 
-Tukar:
+Change to:
 
 ```json
 "version": "0.1.2"
 ```
 
-Pastikan dua-dua sama.
+Make sure both versions match.
 
 ---
 
@@ -54,19 +53,19 @@ Run:
 npm run tauri build
 ```
 
-Tunggu sampai siap.
+Wait until the build completes.
 
 ---
 
-# 3. Cari file output
+# 3. Locate output files
 
-Biasanya dekat:
+Typically found at:
 
 ```bash
 src-tauri/target/release/bundle/nsis/
 ```
 
-Akan ada:
+You will see:
 
 ```text
 Tien Tien E-Leave_0.1.2_x64-setup.exe
@@ -77,7 +76,7 @@ Tien Tien E-Leave_0.1.2_x64-setup.exe.sig
 
 # 4. Generate latest.json
 
-Buat file `latest.json`
+Create a file called `latest.json`
 
 Paste:
 
@@ -99,15 +98,15 @@ Paste:
 
 # 5. Copy signature
 
-Buka file:
+Open the file:
 
 ```bash
 Tien Tien E-Leave_0.1.2_x64-setup.exe.sig
 ```
 
-Copy semua content.
+Copy the entire content.
 
-Paste ke:
+Paste into:
 
 ```json
 "signature": ""
@@ -127,11 +126,11 @@ git push
 
 # 7. Create GitHub Release
 
-Buka:
+Go to:
 
 https://github.com/marketingttesb/eleave.app/releases
 
-Klik:
+Click:
 
 ```text
 Draft a new release
@@ -139,7 +138,7 @@ Draft a new release
 
 ---
 
-# 8. Isi release info
+# 8. Fill in release info
 
 ## Tag
 
@@ -167,7 +166,7 @@ Update Manage Personal Leave
 
 # 9. Upload files
 
-Upload 3 file:
+Upload 3 files:
 
 ```text
 latest.json
@@ -179,7 +178,7 @@ Tien Tien E-Leave_0.1.2_x64-setup.exe.sig
 
 # 10. Publish
 
-Klik:
+Click:
 
 ```text
 Publish release
@@ -189,7 +188,7 @@ Publish release
 
 # 11. Test update
 
-Open current installed app.
+Open the currently installed app.
 
 Click:
 
@@ -197,7 +196,7 @@ Click:
 Check for updates
 ```
 
-Expected:
+Expected behavior:
 
 ```text
 Update available
@@ -213,13 +212,13 @@ Update complete
 
 # IMPORTANT CHECKLIST
 
-Before publish:
+Before publishing:
 
-☐ version package.json updated
-☐ version tauri.conf.json updated
+☐ version in package.json updated
+☐ version in tauri.conf.json updated
 ☐ build success
 ☐ .exe uploaded
 ☐ .sig uploaded
 ☐ latest.json uploaded
-☐ tag uses `v0.1.2` (NO `v.0.1.2`)
+☐ tag uses `v0.1.2` (NOT `v.0.1.2`)
 ☐ latest.json URL exactly matches uploaded .exe filename

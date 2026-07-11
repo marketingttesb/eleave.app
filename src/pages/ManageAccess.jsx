@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react'
 
+import { toTitleCase } from '../lib/format'
+import { cardStyle } from '../lib/styles'
+
 export default function ManageAccess({ supabase, currentAdminProfile }) {
   const [managedUsers, setManagedUsers] = useState([])
   const [allStaffList, setAllStaffList] = useState([])
@@ -14,8 +17,6 @@ export default function ManageAccess({ supabase, currentAdminProfile }) {
   const [modalIsSuperior, setModalIsSuperior] = useState(false)
   const [modalIsHr, setModalIsHr] = useState(false)
   const [modalIsSuperAdmin, setModalIsSuperAdmin] = useState(false)
-
-  const cardStyle = { backgroundColor: 'white', padding: '30px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }
 
   useEffect(() => {
     fetchElevatedUsers()
@@ -114,7 +115,7 @@ export default function ManageAccess({ supabase, currentAdminProfile }) {
       }
     }
 
-    const confirmCheck = window.confirm(`Are you sure you want to revoke ALL elevated management access for ${user.full_name}?`)
+    const confirmCheck = window.confirm(`Are you sure you want to revoke ALL elevated management access for ${toTitleCase(user.full_name)}?`)
     if (!confirmCheck) return
 
     setActionLoading(true)
@@ -175,7 +176,7 @@ export default function ManageAccess({ supabase, currentAdminProfile }) {
                   onMouseEnter={(e) => e.target.style.backgroundColor = '#f3f4f6'}
                   onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                 >
-                  <div style={{ fontWeight: '600', color: '#111827' }}>{staff.full_name}</div>
+                  <div style={{ fontWeight: '600', color: '#111827' }}>{toTitleCase(staff.full_name)}</div>
                   <div style={{ fontSize: '12px', color: '#6b7280' }}>{staff.position || 'General Staff'}</div>
                 </div>
               ))}
@@ -212,7 +213,7 @@ export default function ManageAccess({ supabase, currentAdminProfile }) {
 
                 return (
                   <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                    <td style={{ padding: '14px 16px', fontSize: '14px', fontWeight: '600', color: '#111827' }}>{user.full_name}</td>
+                    <td style={{ padding: '14px 16px', fontSize: '14px', fontWeight: '600', color: '#111827' }}>{toTitleCase(user.full_name)}</td>
                     <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4b5563' }}>{user.position || '—'}</td>
                     
                     {/* Superior Flag Checkbox */}
@@ -294,7 +295,7 @@ export default function ManageAccess({ supabase, currentAdminProfile }) {
           <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '12px', width: '400px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <h3 style={{ margin: '0 0 10px 0', color: '#111827', fontSize: '18px' }}>Configure System Access</h3>
             <p style={{ color: '#6b7280', fontSize: '14px', margin: '0 0 20px 0' }}>
-              Assign elevated permissions for <strong>{selectedStaff.full_name}</strong> ({selectedStaff.position || 'Staff'}).
+              Assign elevated permissions for <strong>{toTitleCase(selectedStaff.full_name)}</strong> ({selectedStaff.position || 'Staff'}).
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>

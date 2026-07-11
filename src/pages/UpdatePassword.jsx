@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { cardStyle as baseCardStyle } from '../lib/styles'
 
 export default function UpdatePassword({ supabase }) {
   const [newPassword, setNewPassword] = useState('')
@@ -6,15 +7,7 @@ export default function UpdatePassword({ supabase }) {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
 
-  const cardStyle = { 
-    backgroundColor: 'white', 
-    padding: '30px', 
-    borderRadius: '12px', 
-    border: '1px solid #e5e7eb', 
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    maxWidth: '400px',
-    margin: '40px auto'
-  }
+  const cardStyle = { ...baseCardStyle, maxWidth: '400px', margin: '40px auto' }
 
   const handleUpdate = async (e) => {
     e.preventDefault()

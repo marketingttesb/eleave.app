@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { check } from '@tauri-apps/plugin-updater'
-import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
-
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { enable, isEnabled } from '@tauri-apps/plugin-autostart'
+import { isTauri } from './lib/tauri'
+import { cardStyle } from './lib/styles'
 
 // Import our new decoupled items
+import { toTitleCase } from './lib/format'
+import ErrorBoundary from './components/ErrorBoundary'
 import TopBanner from './components/TopBanner'
 import Topbar from './components/Topbar'
 import Dashboard from './pages/Dashboard'
@@ -31,7 +30,7 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 export default function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
-  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [authError, setAuthError] = useState('') // State for authentication errors
@@ -49,11 +48,12 @@ export default function App() {
 
   useEffect(() => {
     const checkForUpdates = async () => {
+      if (!isTauri) return
       try {
+        const { check } = await import('@tauri-apps/plugin-updater')
         const update = await check();
         if (update) {
           console.log(`Update to ${update.version} available!`);
-          // You can show a custom modal here
           if (window.confirm(`Version ${update.version} is available. Install and restart?`)) {
             await update.downloadAndInstall();
           }
@@ -66,7 +66,6 @@ export default function App() {
     let notificationChannel = null;
 
     const setupNotificationListener = (userId) => {
-      // If we already have a channel for this user, don't re-subscribe
       if (notificationChannel && notificationChannel.topic.includes(userId)) return;
 
       if (notificationChannel) {
@@ -81,37 +80,42 @@ export default function App() {
           schema: 'public', 
           table: 'notifications',
           filter: `user_id=eq.${userId}` 
-        }, payload => {
+        }, async payload => {
           console.log('Notification received:', payload.new);
           
-          // DEBUG FALLBACK: If Realtime works, this browser alert WILL show up
-          // even if the OS desktop notification is blocked.
           alert(`🔔 ${payload.new.title}\n${payload.new.message}`);
 
           setUnreadCount(prev => prev + 1);
 
-          try {
-            sendNotification({ 
-              title: payload.new.title, 
-              body: payload.new.message 
-            });
-          } catch (e) {
-            console.error("Native notification failed:", e);
+          if (isTauri) {
+            try {
+              const { sendNotification } = await import('@tauri-apps/plugin-notification')
+              await sendNotification({ 
+                title: payload.new.title, 
+                body: payload.new.message 
+              });
+            } catch (e) {
+              console.error("Native notification failed:", e);
+            }
           }
         })
         .subscribe();
     };
 
-    const appWindow = getCurrentWindow();
+    const initTauri = async () => {
+      if (!isTauri) return
 
-    // Daftarkan listener penutupan tingkap secepat mungkin
-    const registerCloseListener = async () => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      const { listen } = await import('@tauri-apps/api/event')
+      const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification')
+      const { enable, isEnabled } = await import('@tauri-apps/plugin-autostart')
+
+      const appWindow = getCurrentWindow();
+
       await appWindow.onCloseRequested(async (event) => {
-        // Walaupun Rust sudah buat, kita prevent di JS juga untuk keselamatan
         event.preventDefault(); 
         await appWindow.hide(); 
 
-        // Papar notifikasi "Masih berjalan" sekali sahaja
         const hasNotified = localStorage.getItem('tray_minimized_notified');
         if (!hasNotified) {
           try {
@@ -121,21 +125,15 @@ export default function App() {
             });
             localStorage.setItem('tray_minimized_notified', 'true');
           } catch (e) {
-            console.error("Gagal menghantar notifikasi tray:", e);
+            console.error("Failed to send tray notification:", e);
           }
         }
       });
-    };
 
-    // Minimize → sembunyikan ke tray
-    const registerMinimizeListener = async () => {
-      await appWindow.onMinimize(async () => {
+      await listen('tauri://minimize', async () => {
         await appWindow.hide();
       });
-    };
 
-    const initApp = async () => {
-      // Request Tauri Notification Permission
       try {
         const permission = await isPermissionGranted();
         if (!permission) await requestPermission();
@@ -143,7 +141,6 @@ export default function App() {
         console.warn("Notification permissions could not be requested:", err);
       }
 
-      // Auto-enable Autostart on first run (Default Clicked)
       try {
         const enabled = await isEnabled();
         const preferenceSet = localStorage.getItem('autostart_preference_set');
@@ -154,7 +151,9 @@ export default function App() {
       } catch (err) {
         console.error("Failed to init autostart:", err);
       }
+    };
 
+    const initApp = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       
       setSession(session);
@@ -164,9 +163,7 @@ export default function App() {
       }
     };
 
-    // Jalankan pendaftaran kritikal dahulu
-    registerCloseListener();
-    registerMinimizeListener();
+    initTauri();
     initApp();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -216,21 +213,31 @@ export default function App() {
     e.preventDefault()
     setLoading(true)
     setAuthError('')
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+
+    const trimmed = name.trim().toLowerCase()
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('email')
+      .eq('full_name', trimmed)
+      .maybeSingle()
+
+    if (profileError || !profile?.email) {
+      setAuthError('Invalid name or password. Please contact HR.')
+      setLoading(false)
+      return
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({ email: profile.email, password })
     if (error) { setAuthError(error.message); setLoading(false); }
   }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    setEmail('')
+    setName('')
     setPassword('')
   }
 
-  const cardStyle = { backgroundColor: 'white', padding: '30px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }
-
-  // Simple clean switch workspace switcher
   const renderContent = () => {
-    // Dapatkan nama halaman sama ada activeMenu adalah string atau objek
     const page = typeof activeMenu === 'string' ? activeMenu : activeMenu.page;
     const data = typeof activeMenu === 'string' ? {} : (activeMenu.data || {});
 
@@ -294,11 +301,8 @@ export default function App() {
       case 'system_settings':
         return <SystemSettings />
 
-      //case 'manage_staff': return <div style={cardStyle}><h3>👥 Manage Staff Profiles</h3></div>
-      case 'manage_staff': return <ManageStaff supabase={supabase} /> // No change needed here
-      case 'leave_type': return <div style={cardStyle}><h3>🗂️ Leave Type Configuration</h3></div>; // This is a placeholder, not implemented yet
+      case 'manage_staff': return <ManageStaff supabase={supabase} />
       case 'manage_department':return <ManageDepartments supabase={supabase} />
-      case 'shift_type': return <div style={cardStyle}><h3>📅 Shift Type Configuration</h3></div>; // This is a placeholder, not implemented yet
       case 'public_holiday': return <YearlyPublicHolidays supabase={supabase} />
       case 'daily_report': return <DailyReport supabase={supabase} />
       case 'monthly_report': return <MonthlyReport supabase={supabase} />
@@ -312,8 +316,8 @@ export default function App() {
         <div style={{ padding: '40px', backgroundColor: 'white', borderRadius: '12px', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)', width: '360px' }}>
           <h2 style={{ textAlign: 'center', marginBottom: '8px', color: '#111827', fontWeight: '800' }}>Login E-Leave</h2>
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="Email Address" style={{ padding: '12px', borderRadius: '8px', border: '1px solid #d1d5db' }} />
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Password" style={{ padding: '12px', borderRadius: '8px', border: '1px solid #d1d5db' }} />
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} required placeholder="Full Name" autoComplete="username" style={{ padding: '12px', borderRadius: '8px', border: '1px solid #d1d5db' }} />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Password" autoComplete="current-password" style={{ padding: '12px', borderRadius: '8px', border: '1px solid #d1d5db' }} />
             <button type="submit" disabled={loading} style={{ padding: '12px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
               {loading ? 'Authenticating...' : 'Sign In'}
             </button>
@@ -326,7 +330,6 @@ export default function App() {
 
   if (!profile) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: 'sans-serif', color: '#4f46e5', fontWeight: 'bold' }}>Loading system...</div>
 
-  // Tentukan halaman aktif untuk kegunaan UI (highlight menu)
   const currentPage = typeof activeMenu === 'string' ? activeMenu : activeMenu.page;
 
   return (
@@ -339,8 +342,10 @@ export default function App() {
         unreadCount={unreadCount}
       />
       
-      <div style={{ flex: 1, padding: '40px', overflowY: 'auto' }}>
-        {renderContent()}
+      <div style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
+        <ErrorBoundary>
+          {renderContent()}
+        </ErrorBoundary>
       </div>
     </div>
   )

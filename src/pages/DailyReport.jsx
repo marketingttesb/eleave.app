@@ -3,22 +3,15 @@ import Flatpickr from "react-flatpickr"
 import "flatpickr/dist/themes/light.css"
 import { format } from "date-fns"
 
+import { toTitleCase } from '../lib/format'
+import { cardStyle } from '../lib/styles'
+
 export default function DailyReport({ supabase }) {
   const [reportData, setReportData] = useState({})
   const [loading, setLoading] = useState(false)
   
   const today = format(new Date(), "yyyy-MM-dd")
   const [selectedDate, setSelectedDate] = useState(today)
-
-  const cardStyle = { 
-    backgroundColor: 'white', 
-    padding: '30px', 
-    borderRadius: '12px', 
-    border: '1px solid #e5e7eb', 
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    width: '100%',
-    boxSizing: 'border-box'
-  }
 
   useEffect(() => {
     fetchData()
@@ -45,7 +38,7 @@ export default function DailyReport({ supabase }) {
       const grouped = {}
       data.forEach(item => {
         const dept = item.staff?.departments?.name || 'Unassigned'
-        const staff = item.staff?.full_name || 'Unknown Staff'
+        const staff = toTitleCase(item.staff?.full_name) || 'Unknown Staff'
         
         if (!grouped[dept]) grouped[dept] = {}
         if (!grouped[dept][staff]) grouped[dept][staff] = []
@@ -58,7 +51,7 @@ export default function DailyReport({ supabase }) {
 
   const exportExcel = () => {
     if (Object.keys(reportData).length === 0) {
-      alert("Tiada data untuk dieksport.");
+      alert("No data to export.");
       return;
     }
 
@@ -84,12 +77,12 @@ export default function DailyReport({ supabase }) {
       document.body.appendChild(link);
       link.click();
       
-      window.alert(`Laporan Excel telah berjaya dimuat turun ke folder 'Downloads' anda.\n\nNama fail: Daily_Leave_Report_${selectedDate}.csv`);
+      window.alert(`Excel report has been downloaded to your Downloads folder.\n\nFilename: Daily_Leave_Report_${selectedDate}.csv`);
 
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
-      alert("Gagal mengeksport fail Excel: " + err.message);
+      alert("Failed to export Excel file: " + err.message);
     }
   }
 

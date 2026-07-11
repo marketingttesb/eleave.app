@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { format, parseISO } from 'date-fns'
+import { cardStyle } from '../lib/styles'
 
 export default function MyMsg({ supabase, profile, onMarkRead, setActiveMenu }) {
   const [notifications, setNotifications] = useState([])
@@ -89,12 +90,6 @@ export default function MyMsg({ supabase, profile, onMarkRead, setActiveMenu }) 
       if (onMarkRead) onMarkRead(); // Kemaskini badge unread count jika mesej dipadam
     }
     setLoading(false);
-  }
-
-  const cardStyle = { 
-    backgroundColor: 'white', padding: '30px', borderRadius: '12px', 
-    border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    width: '100%', boxSizing: 'border-box'
   }
 
   return (

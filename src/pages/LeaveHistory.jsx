@@ -1,18 +1,9 @@
 import React, { useState, useEffect } from 'react'
+import { cardStyle } from '../lib/styles'
 
 export default function LeaveHistory({ supabase, profile, onActionSuccess }) {
   const [leaveHistory, setLeaveHistory] = useState([])
   const [loading, setLoading] = useState(false)
-
-  const cardStyle = { 
-    backgroundColor: 'white', 
-    padding: '30px', 
-    borderRadius: '12px', 
-    border: '1px solid #e5e7eb', 
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    width: '100%',
-    boxSizing: 'border-box'
-  }
 
   useEffect(() => {
     fetchLeaveHistory()

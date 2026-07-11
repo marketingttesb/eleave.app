@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
+import { toTitleCase } from '../lib/format'
+import { cardStyle as baseCardStyle } from '../lib/styles'
+
 export default function ManageStaff({ supabase }) {
   const [staffList, setStaffList] = useState([])
   const [departmentList, setDepartmentList] = useState([]) // Memegang senarai jabatan dari DB
@@ -29,18 +32,8 @@ export default function ManageStaff({ supabase }) {
   const [workingDays, setWorkingDays] = useState('5_days')
   const [staffStatus, setStaffStatus] = useState('Active')
 
-  // Ditukar kepada width 100% untuk konsistensi reka bentuk sistem
-  const cardStyle = { 
-    backgroundColor: 'white', 
-    padding: '30px', 
-    borderRadius: '12px', 
-    border: '1px solid #e5e7eb', 
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    width: '100%',
-    boxSizing: 'border-box'
-  }
+  const cardStyle = { ...baseCardStyle, padding: '30px' }
 
-  // LOAD DATA SERENTAK MENGGUNAKAN ASYNC/AWAIT
   useEffect(() => {
     const initPageData = async () => {
       setActionLoading(true)
@@ -60,7 +53,7 @@ export default function ManageStaff({ supabase }) {
       .order('name', { ascending: true })
     
     if (error) {
-      console.error("Gagal ambil data departments:", error.message)
+      console.error("Failed to fetch departments:", error.message)
       return
     }
 
@@ -373,14 +366,14 @@ export default function ManageStaff({ supabase }) {
               filteredStaff.map((staff) => (
                 <tr key={staff.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                   <td style={{ padding: '14px 16px', fontSize: '14px', fontWeight: '600', color: '#111827' }}>
-                    <div>{staff.full_name}</div>
+                    <div>{toTitleCase(staff.full_name)}</div>
                     <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: '400' }}>{staff.email || 'No Account Email'}</div>
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4b5563' }}>
                     {staff.departments?.name || '—'}
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4b5563' }}>
-                    {staff.superior?.full_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>Not Assigned</span>}
+                    {toTitleCase(staff.superior?.full_name) || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>Not Assigned</span>}
                   </td>
                   <td style={{ padding: '14px 16px', fontSize: '14px', color: '#4b5563' }}>{staff.position || '—'}</td>
                   <td style={{ padding: '14px 16px', textAlign: 'center' }}>
@@ -495,7 +488,7 @@ export default function ManageStaff({ supabase }) {
                 >
                   <option value="">-- No Superior Assigned --</option>
                   {superiorList.map(sup => (
-                    <option key={sup.id} value={sup.id}>{sup.full_name}</option>
+                    <option key={sup.id} value={sup.id}>{toTitleCase(sup.full_name)}</option>
                   ))}
                 </select>
               </label>

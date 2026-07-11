@@ -1,45 +1,56 @@
 import React, { useState, useEffect } from 'react'
-import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
+import { isTauri } from '../lib/tauri'
+import { cardStyle as baseCardStyle } from '../lib/styles'
 
 export default function SystemSettings() {
   const [autoStart, setAutoStart] = useState(false)
+  const [supportsAutostart, setSupportsAutostart] = useState(false)
 
   useEffect(() => {
+    if (!isTauri) return
     const checkAutoStart = async () => {
-      const enabled = await isEnabled();
-      setAutoStart(enabled);
-    };
-    checkAutoStart();
-  }, []);
+      try {
+        const { isEnabled } = await import('@tauri-apps/plugin-autostart')
+        const enabled = await isEnabled()
+        setAutoStart(enabled)
+        setSupportsAutostart(true)
+      } catch (err) {
+        console.error('Autostart check failed:', err)
+      }
+    }
+    checkAutoStart()
+  }, [])
 
   const toggleAutoStart = async () => {
+    if (!isTauri) return
     try {
+      const { enable, disable } = await import('@tauri-apps/plugin-autostart')
       if (autoStart) {
-        await disable();
-        setAutoStart(false);
+        await disable()
+        setAutoStart(false)
       } else {
-        await enable();
-        setAutoStart(true);
+        await enable()
+        setAutoStart(true)
       }
-      localStorage.setItem('autostart_preference_set', 'true');
     } catch (err) {
-      console.error("Autostart toggle failed:", err);
+      console.error('Autostart toggle failed:', err)
     }
-  };
+  }
 
-  const cardStyle = { 
-    backgroundColor: 'white', 
-    padding: '30px', 
-    borderRadius: '12px', 
-    border: '1px solid #e5e7eb', 
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    maxWidth: '500px',
-    margin: '40px auto'
+  const cardStyle = { ...baseCardStyle, maxWidth: '500px', margin: '40px auto', padding: '30px' }
+
+  if (!isTauri || !supportsAutostart) {
+    return (
+      <div style={cardStyle}>
+        <h3 style={{ margin: '0 0 10px 0', color: '#4f46e5', fontSize: '20px' }}>System Settings</h3>
+        <p style={{ color: '#6b7280', fontSize: '14px' }}>System settings are only available in the desktop app.</p>
+      </div>
+    )
   }
 
   return (
     <div style={cardStyle}>
-      <h3 style={{ margin: '0 0 10px 0', color: '#4f46e5', fontSize: '20px' }}>⚙️ System Settings</h3>
+      <h3 style={{ margin: '0 0 10px 0', color: '#4f46e5', fontSize: '20px' }}>System Settings</h3>
       <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '25px' }}>Configure how the E-Leave application behaves on your computer.</p>
       
       <div style={{ padding: '20px', backgroundColor: '#f9fafb', borderRadius: '10px', border: '1px solid #e5e7eb' }}>

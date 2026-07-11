@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Flatpickr from "react-flatpickr";
 import "flatpickr/dist/themes/light.css"; // You can choose different themes
 import { format } from "date-fns"; // Useful for parsing dates
+import { cardStyle } from '../lib/styles';
 
 export default function YearlyPublicHolidays({ supabase }) {
   const [publicHolidays, setPublicHolidays] = useState([]);
@@ -16,16 +17,6 @@ export default function YearlyPublicHolidays({ supabase }) {
   const [editingHolidayId, setEditingHolidayId] = useState(null);
   const [holidayDate, setHolidayDate] = useState('');
   const [holidayName, setHolidayName] = useState('');
-
-  const cardStyle = {
-    backgroundColor: 'white',
-    padding: '30px',
-    borderRadius: '12px',
-    border: '1px solid #e5e7eb',
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    width: '100%',
-    boxSizing: 'border-box',
-  };
 
   const inputStyle = {
     padding: '10px 14px',

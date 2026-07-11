@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react'
 
+import { toTitleCase } from '../lib/format'
+import { cardStyle } from '../lib/styles'
+
 export default function MonthlyReport({ supabase }) {
   const [reportData, setReportData] = useState({})
   const [loading, setLoading] = useState(false)
@@ -13,16 +16,6 @@ export default function MonthlyReport({ supabase }) {
     "July", "August", "September", "October", "November", "December"
   ]
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i)
-
-  const cardStyle = { 
-    backgroundColor: 'white', 
-    padding: '30px', 
-    borderRadius: '12px', 
-    border: '1px solid #e5e7eb', 
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
-    width: '100%',
-    boxSizing: 'border-box'
-  }
 
   useEffect(() => {
     fetchData()
@@ -56,7 +49,7 @@ export default function MonthlyReport({ supabase }) {
       const grouped = {}
       data.forEach(item => {
         const dept = item.staff?.departments?.name || 'Unassigned'
-        const staff = item.staff?.full_name || 'Unknown Staff'
+        const staff = toTitleCase(item.staff?.full_name) || 'Unknown Staff'
         
         if (!grouped[dept]) grouped[dept] = {}
         if (!grouped[dept][staff]) grouped[dept][staff] = []
@@ -69,7 +62,7 @@ export default function MonthlyReport({ supabase }) {
 
   const exportExcel = () => {
     if (Object.keys(reportData).length === 0) {
-      alert("Tiada data untuk dieksport.");
+      alert("No data to export.");
       return;
     }
 
@@ -99,13 +92,13 @@ export default function MonthlyReport({ supabase }) {
       link.click();
       
       // Notifikasi setelah download bermula, memberitahu lokasi fail
-      window.alert(`Laporan Excel telah berjaya dimuat turun ke folder 'Downloads' anda.\n\nNama fail: Leave_Report_${months[month-1]}_${year}.csv`);
+      window.alert(`Excel report has been downloaded to your Downloads folder.\n\nFilename: Leave_Report_${months[month-1]}_${year}.csv`);
 
       document.body.removeChild(link);
       // Revoke URL selepas sedikit delay untuk memastikan 'Open' sempat diproses
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
-      alert("Gagal mengeksport fail Excel: " + err.message);
+      alert("Failed to export Excel file: " + err.message);
     }
   }
 
